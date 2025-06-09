@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "description": "A web app for viewing FAA construction crane data near a specified location",
   "main": "index.js",
-  "homepage": "https://USERNAME.github.io/faa-crane-viewer",
+  "homepage": "https://jeffreyp.github.io/faa-crane-viewer",
   "scripts": {
     "start": "webpack serve --open",
     "build": "webpack",
