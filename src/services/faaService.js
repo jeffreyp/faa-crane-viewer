@@ -108,12 +108,16 @@ export const fetchCraneData = async (location, radiusNM) => {
       );
     }
     
-    return craneData;
+    return { data: craneData, usedMockData: false };
   } catch (error) {
     console.error('Error fetching crane data:', error);
     
-    // Return mock data as fallback
-    return MOCK_CRANE_DATA;
+    // Return mock data as fallback with a flag indicating mock data was used
+    return { 
+      data: MOCK_CRANE_DATA, 
+      usedMockData: true,
+      error: error.message || 'Failed to load CSV data'
+    };
   }
 };
 

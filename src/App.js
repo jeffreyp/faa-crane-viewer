@@ -56,8 +56,13 @@ const App = () => {
     setError(null);
     
     try {
-      const data = await fetchCraneData(location, radius);
-      setCranes(data);
+      const result = await fetchCraneData(location, radius);
+      setCranes(result.data);
+      
+      // Display warning if mock data was used
+      if (result.usedMockData) {
+        setError(`Warning: Using mock data. Could not load CSV: ${result.error}`);
+      }
     } catch (err) {
       setError(`Failed to fetch crane data: ${err.message || 'Unknown error'}`);
       console.error('Error fetching data:', err);
@@ -86,7 +91,13 @@ const App = () => {
           loading={loading}
         />
       </Header>
-      {error && <div style={{ color: 'red', padding: '0.5rem' }}>{error}</div>}
+      {error && <div style={{ 
+        color: error.startsWith('Warning:') ? 'orange' : 'red', 
+        backgroundColor: error.startsWith('Warning:') ? '#FFF8E1' : '#FFEBEE',
+        padding: '0.5rem',
+        margin: '0',
+        borderBottom: '1px solid #DDD'
+      }}>{error}</div>}
       <ViewsContainer>
         <MapView location={location} radius={radius} cranes={cranes} />
         <TableView cranes={cranes} loading={loading} />

@@ -11,9 +11,9 @@ const craneIcon = L.icon({
   popupAnchor: [0, -30]
 });
 
-// Create star icon for selected address
+// Create star icon for selected address (purple)
 const starIcon = L.icon({
-  iconUrl: 'https://cdn-icons-png.flaticon.com/512/929/929495.png',
+  iconUrl: 'https://cdn-icons-png.flaticon.com/512/2107/2107957.png',
   iconSize: [40, 40],
   iconAnchor: [20, 40],
   popupAnchor: [0, -40]
@@ -47,6 +47,20 @@ const MapView = ({ location, radius, cranes }) => {
       }).addTo(map);
       
       mapInstanceRef.current = map;
+      
+      // Handle resize events
+      const handleResize = () => {
+        if (mapInstanceRef.current) {
+          mapInstanceRef.current.invalidateSize();
+        }
+      };
+      
+      window.addEventListener('resize', handleResize);
+      
+      // Clean up resize listener on unmount
+      return () => {
+        window.removeEventListener('resize', handleResize);
+      };
     }
     
     return () => {
@@ -57,24 +71,9 @@ const MapView = ({ location, radius, cranes }) => {
     };
   }, []);
 
-  // Update the map when location or radius changes
+  // Update the map when location changes
   useEffect(() => {
     if (mapInstanceRef.current) {
-      // Update map center
-      mapInstanceRef.current.setView([location.lat, location.lng], 11);
-      
-      // Update or create radius circle
-      if (circleLayerRef.current) {
-        mapInstanceRef.current.removeLayer(circleLayerRef.current);
-      }
-      
-      circleLayerRef.current = L.circle([location.lat, location.lng], {
-        color: 'blue',
-        fillColor: '#30f',
-        fillOpacity: 0.1,
-        radius: RADIUS_NM_TO_METERS(radius)
-      }).addTo(mapInstanceRef.current);
-      
       // Add or update star marker for the selected address
       if (addressMarkerRef.current) {
         mapInstanceRef.current.removeLayer(addressMarkerRef.current);
@@ -90,6 +89,23 @@ const MapView = ({ location, radius, cranes }) => {
         <strong>Selected Address</strong><br/>
         ${location.address || 'Current location'}
       `);
+    }
+  }, [location]);
+
+  // Update radius circle when radius changes
+  useEffect(() => {
+    if (mapInstanceRef.current) {
+      // Update or create radius circle
+      if (circleLayerRef.current) {
+        mapInstanceRef.current.removeLayer(circleLayerRef.current);
+      }
+      
+      circleLayerRef.current = L.circle([location.lat, location.lng], {
+        color: 'blue',
+        fillColor: '#30f',
+        fillOpacity: 0.1,
+        radius: RADIUS_NM_TO_METERS(radius)
+      }).addTo(mapInstanceRef.current);
     }
   }, [location, radius]);
 
@@ -127,12 +143,14 @@ const MapView = ({ location, radius, cranes }) => {
         addressMarkerRef.current.bringToFront();
       }
       
-      // Fit map bounds to show all markers and the radius circle
-      const bounds = circleLayerRef.current.getBounds();
-      if (geojsonLayerRef.current.getBounds().isValid()) {
-        bounds.extend(geojsonLayerRef.current.getBounds());
+      // Only fit bounds when cranes data first loads, not on every update
+      if (cranes.length > 0 && circleLayerRef.current) {
+        const bounds = circleLayerRef.current.getBounds();
+        if (geojsonLayerRef.current.getBounds().isValid()) {
+          bounds.extend(geojsonLayerRef.current.getBounds());
+        }
+        mapInstanceRef.current.fitBounds(bounds);
       }
-      mapInstanceRef.current.fitBounds(bounds);
     }
   }, [cranes]);
 
