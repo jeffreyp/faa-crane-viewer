@@ -109,7 +109,7 @@ const TableView = ({ cranes, loading }) => {
   const columns = [
     { field: 'id', label: 'ID' },
     { field: 'structureType', label: 'Type' },
-    { field: 'height', label: 'Height' },
+    { field: 'height', label: 'Height (AGL)' },
     { field: 'status', label: 'Status' },
     { field: 'startDate', label: 'Start Date' },
     { field: 'endDate', label: 'End Date' },
@@ -149,7 +149,7 @@ const TableView = ({ cranes, loading }) => {
               {columns.map(column => (
                 <TableCell key={`${crane.id}-${column.field}`}>
                   {column.field === 'height' 
-                    ? `${crane[column.field]} ${crane.heightUnit}`
+                    ? `${crane[column.field]} ft`
                     : crane[column.field]}
                 </TableCell>
               ))}
@@ -162,7 +162,7 @@ const TableView = ({ cranes, loading }) => {
   
   return (
     <TableContainer>
-      <h2>Construction Cranes</h2>
+      <h2>Construction Cranes {cranes.length > 0 ? `(${cranes.length} found)` : ''}</h2>
       {renderContent()}
     </TableContainer>
   );

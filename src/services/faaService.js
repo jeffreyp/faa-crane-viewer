@@ -37,11 +37,17 @@ const parseCSVData = async (csvData) => {
     Papa.parse(csvData, {
       header: true,
       complete: (results) => {
+        console.log(`CSV parsed, total rows: ${results.data.length}`);
+        
         // Filter for crane entries
         const craneData = results.data.filter(entry => {
           // Look for entries with "CRANE" in the STRUCTURE TYPE field
-          return entry['STRUCTURE TYPE'] && entry['STRUCTURE TYPE'].includes('CRANE');
+          return entry['STRUCTURE TYPE'] && 
+                 (entry['STRUCTURE TYPE'].includes('CRANE') || 
+                  (entry['STRUCTURE TYPE'].startsWith('CRANE')));
         });
+        
+        console.log(`Found ${craneData.length} crane entries in CSV`);
         
         // Transform data to the expected format
         const transformedData = craneData.map(entry => {
@@ -51,7 +57,7 @@ const parseCSVData = async (csvData) => {
           
           // Parse coordinates from DMS to decimal
           const latitude = dmsToDecimal(entry['LATITUDE']);
-          const longitude = dmsToDecimal(entry['LONGITUTDE']); // Note the typo in the CSV header
+          const longitude = dmsToDecimal(entry['LONGITUTDE']); // CSV header has typo, but we match it
           
           // Get height from either AGL HEIGHT PROPOSED or AGL HEIGHT DET
           const height = parseInt(entry['AGL HEIGHT PROPOSED'] || entry['AGL HEIGHT DET'] || '0');
@@ -72,6 +78,7 @@ const parseCSVData = async (csvData) => {
           };
         });
         
+        console.log(`Transformed ${transformedData.length} crane entries`);
         resolve(transformedData);
       },
       error: (error) => {
@@ -105,18 +112,8 @@ export const fetchCraneData = async (location, radiusNM) => {
   } catch (error) {
     console.error('Error fetching crane data:', error);
     
-    // Fallback to mock data if there's an error
-    console.warn('Falling back to mock data');
-    let filteredData = MOCK_CRANE_DATA;
-    
-    // Only filter by location if both location and radius are provided
-    if (location && radiusNM) {
-      filteredData = MOCK_CRANE_DATA.filter(crane => 
-        isPointWithinRadius(location, crane, radiusNM)
-      );
-    }
-    
-    return filteredData;
+    // Return mock data as fallback
+    return MOCK_CRANE_DATA;
   }
 };
 
@@ -240,6 +237,146 @@ const MOCK_CRANE_DATA = [
     startDate: "2025-03-15",
     endDate: "2025-08-01",
     sponsor: "Southwest Builders Group",
+    city: "Tolleson",
+    state: "AZ"
+  },
+  {
+    id: "2023-WSW-1239-OE",
+    structureType: "Crane",
+    latitude: 33.4386,
+    longitude: -112.2462,
+    height: 160,
+    heightUnit: "ft AGL",
+    status: "Active",
+    startDate: "2025-05-01",
+    endDate: "2025-08-30",
+    sponsor: "Valley Builders LLC",
+    city: "Tolleson",
+    state: "AZ"
+  },
+  {
+    id: "2023-WSW-1240-OE",
+    structureType: "Crane",
+    latitude: 33.4526,
+    longitude: -112.2532,
+    height: 205,
+    heightUnit: "ft AGL",
+    status: "Active",
+    startDate: "2025-04-15",
+    endDate: "2025-07-15",
+    sponsor: "Metro Construction Group",
+    city: "Tolleson",
+    state: "AZ"
+  },
+  {
+    id: "2023-WSW-1241-OE",
+    structureType: "Crane",
+    latitude: 33.4406,
+    longitude: -112.2612,
+    height: 180,
+    heightUnit: "ft AGL",
+    status: "Pending",
+    startDate: "2025-06-01",
+    endDate: "2025-09-01",
+    sponsor: "Desert Crane Services",
+    city: "Tolleson",
+    state: "AZ"
+  },
+  {
+    id: "2023-WSW-1242-OE",
+    structureType: "Crane",
+    latitude: 33.4496,
+    longitude: -112.2402,
+    height: 215,
+    heightUnit: "ft AGL",
+    status: "Active",
+    startDate: "2025-03-01",
+    endDate: "2025-08-15",
+    sponsor: "Arizona Building Co.",
+    city: "Tolleson",
+    state: "AZ"
+  },
+  {
+    id: "2023-WSW-1243-OE",
+    structureType: "Crane",
+    latitude: 33.4536,
+    longitude: -112.2712,
+    height: 170,
+    heightUnit: "ft AGL",
+    status: "Active",
+    startDate: "2025-05-15",
+    endDate: "2025-09-30",
+    sponsor: "Western Crane Rentals",
+    city: "Tolleson",
+    state: "AZ"
+  },
+  {
+    id: "2023-WSW-1244-OE",
+    structureType: "Crane",
+    latitude: 33.4436,
+    longitude: -112.2482,
+    height: 200,
+    heightUnit: "ft AGL",
+    status: "Active",
+    startDate: "2025-04-01",
+    endDate: "2025-08-01",
+    sponsor: "Southwestern Development Inc.",
+    city: "Tolleson",
+    state: "AZ"
+  },
+  {
+    id: "2023-WSW-1245-OE",
+    structureType: "Crane",
+    latitude: 33.4576,
+    longitude: -112.2432,
+    height: 185,
+    heightUnit: "ft AGL",
+    status: "Pending",
+    startDate: "2025-06-15",
+    endDate: "2025-10-15",
+    sponsor: "Maricopa Construction LLC",
+    city: "Tolleson",
+    state: "AZ"
+  },
+  {
+    id: "2023-WSW-1246-OE",
+    structureType: "Crane",
+    latitude: 33.4626,
+    longitude: -112.2572,
+    height: 195,
+    heightUnit: "ft AGL",
+    status: "Active",
+    startDate: "2025-03-15",
+    endDate: "2025-07-30",
+    sponsor: "Phoenix Metro Builders",
+    city: "Tolleson",
+    state: "AZ"
+  },
+  {
+    id: "2023-WSW-1247-OE",
+    structureType: "Crane",
+    latitude: 33.4676,
+    longitude: -112.2512,
+    height: 175,
+    heightUnit: "ft AGL",
+    status: "Active",
+    startDate: "2025-05-01",
+    endDate: "2025-09-15",
+    sponsor: "Arizona Urban Development",
+    city: "Tolleson",
+    state: "AZ"
+  },
+  {
+    id: "2023-WSW-1248-OE",
+    structureType: "Crane",
+    latitude: 33.4416,
+    longitude: -112.2642,
+    height: 210,
+    heightUnit: "ft AGL",
+    status: "Active",
+    startDate: "2025-04-15",
+    endDate: "2025-08-15",
+    sponsor: "Grand Avenue Construction",
     city: "Tolleson",
     state: "AZ"
   }

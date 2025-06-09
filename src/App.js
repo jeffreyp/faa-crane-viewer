@@ -59,15 +59,19 @@ const App = () => {
       const data = await fetchCraneData(location, radius);
       setCranes(data);
     } catch (err) {
-      setError(err.message || 'Failed to fetch crane data');
-      console.error(err);
+      setError(`Failed to fetch crane data: ${err.message || 'Unknown error'}`);
+      console.error('Error fetching data:', err);
+      // Fall back to empty data array rather than crashing
+      setCranes([]);
     } finally {
       setLoading(false);
     }
   };
 
   const handleSearch = (address, radius) => {
-    // This would normally geocode the address, but we're using mock data
+    // In a real app, we would geocode the address here
+    // For now, we'll keep using the same location but update the radius
+    setRadius(radius);
     searchCranes(location, radius);
   };
 
