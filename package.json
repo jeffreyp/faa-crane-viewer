@@ -1,0 +1,42 @@
+{
+  "name": "faa-crane-viewer",
+  "version": "1.0.0",
+  "description": "A web app for viewing FAA construction crane data near a specified location",
+  "main": "index.js",
+  "homepage": "https://USERNAME.github.io/faa-crane-viewer",
+  "scripts": {
+    "start": "webpack serve --open",
+    "build": "webpack",
+    "predeploy": "npm run build",
+    "deploy": "gh-pages -d public",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [
+    "faa",
+    "cranes",
+    "obstruction",
+    "map",
+    "aviation"
+  ],
+  "author": "",
+  "license": "MIT",
+  "devDependencies": {
+    "@babel/core": "^7.27.4",
+    "@babel/preset-env": "^7.27.2",
+    "@babel/preset-react": "^7.27.1",
+    "babel-loader": "^10.0.0",
+    "css-loader": "^7.1.2",
+    "gh-pages": "^6.0.0",
+    "style-loader": "^4.0.0",
+    "webpack": "^5.99.9",
+    "webpack-cli": "^6.0.1",
+    "webpack-dev-server": "^5.2.2"
+  },
+  "dependencies": {
+    "leaflet": "^1.9.4",
+    "papaparse": "^5.5.3",
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0",
+    "styled-components": "^6.1.18"
+  }
+}
