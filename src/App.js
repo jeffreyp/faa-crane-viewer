@@ -41,8 +41,8 @@ const App = () => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [location, setLocation] = useState({
-    lat: 33.4456, // Tolleson, AZ default location
-    lng: -112.2592,
+    lat: 33.448037, // Southeast corner of S 107th Ave and W Van Buren St
+    lng: -112.285957,
     address: "10601 W Van Buren St, Tolleson, AZ 85353"
   });
   const [radius, setRadius] = useState(10); // 10 nautical miles

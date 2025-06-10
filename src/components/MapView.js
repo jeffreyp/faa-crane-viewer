@@ -11,9 +11,9 @@ const craneIcon = L.icon({
   popupAnchor: [0, -30]
 });
 
-// Create star icon for selected address (purple)
+// Create star icon for selected address (red)
 const starIcon = L.icon({
-  iconUrl: 'https://cdn-icons-png.flaticon.com/512/2107/2107957.png',
+  iconUrl: 'https://cdn-icons-png.flaticon.com/512/1828/1828614.png',
   iconSize: [40, 40],
   iconAnchor: [20, 40],
   popupAnchor: [0, -40]
@@ -42,8 +42,8 @@ const MapView = ({ location, radius, cranes }) => {
     if (!mapInstanceRef.current) {
       const map = L.map(mapRef.current).setView([location.lat, location.lng], 11);
       
-      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-        attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+      L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
+        attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>'
       }).addTo(map);
       
       mapInstanceRef.current = map;
@@ -74,6 +74,9 @@ const MapView = ({ location, radius, cranes }) => {
   // Update the map when location changes
   useEffect(() => {
     if (mapInstanceRef.current) {
+      // Update map view to center on new location
+      mapInstanceRef.current.setView([location.lat, location.lng], mapInstanceRef.current.getZoom());
+      
       // Add or update star marker for the selected address
       if (addressMarkerRef.current) {
         mapInstanceRef.current.removeLayer(addressMarkerRef.current);
@@ -144,12 +147,9 @@ const MapView = ({ location, radius, cranes }) => {
       }
       
       // Only fit bounds when cranes data first loads, not on every update
+      // Center on the search location to keep the star fixed
       if (cranes.length > 0 && circleLayerRef.current) {
-        const bounds = circleLayerRef.current.getBounds();
-        if (geojsonLayerRef.current.getBounds().isValid()) {
-          bounds.extend(geojsonLayerRef.current.getBounds());
-        }
-        mapInstanceRef.current.fitBounds(bounds);
+        mapInstanceRef.current.fitBounds(circleLayerRef.current.getBounds());
       }
     }
   }, [cranes]);
