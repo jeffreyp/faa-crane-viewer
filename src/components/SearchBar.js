@@ -91,6 +91,7 @@ const SearchBar = ({ defaultAddress, defaultRadius, onSearch, loading }) => {
           value={address}
           onChange={(e) => setAddress(e.target.value)}
           required
+          readOnly
         />
         <RadiusContainer>
           <RadiusLabel>Radius (NM):</RadiusLabel>
