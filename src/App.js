@@ -100,7 +100,7 @@ const App = () => {
         borderBottom: '1px solid #DDD'
       }}>{error}</div>}
       <ViewsContainer>
-        <MapView location={location} radius={radius} cranes={cranes} selectedCraneId={selectedCraneId} />
+        <MapView location={location} radius={radius} cranes={cranes} selectedCraneId={selectedCraneId} onCraneSelect={setSelectedCraneId} />
         <TableView cranes={cranes} loading={loading} selectedCraneId={selectedCraneId} onCraneSelect={setSelectedCraneId} />
       </ViewsContainer>
     </AppContainer>

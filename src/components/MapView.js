@@ -30,7 +30,7 @@ const MapContainer = styled.div`
   }
 `;
 
-const MapView = ({ location, radius, cranes, selectedCraneId }) => {
+const MapView = ({ location, radius, cranes, selectedCraneId, onCraneSelect }) => {
   const mapRef = useRef(null);
   const mapInstanceRef = useRef(null);
   const geojsonLayerRef = useRef(null);
@@ -141,6 +141,13 @@ const MapView = ({ location, radius, cranes, selectedCraneId }) => {
           
           // Store reference to the layer for highlighting
           layer.craneId = props.id;
+          
+          // Add click handler to select crane
+          layer.on('click', () => {
+            if (onCraneSelect) {
+              onCraneSelect(props.id);
+            }
+          });
         }
       }).addTo(mapInstanceRef.current);
       
