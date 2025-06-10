@@ -2,7 +2,8 @@
 import Papa from 'papaparse';
 
 // Constants - using direct absolute path for webpack dev server
-const CSV_PATH = 'data/OffAirportAWP2025List.csv';
+//const CSV_PATH = 'data/OffAirportAWP2025List.csv';
+const CSV_PATH = 'data/datafile.csv';
 
 // Convert DMS (Degrees-Minutes-Seconds) to decimal degrees
 const dmsToDecimal = (dmsStr) => {

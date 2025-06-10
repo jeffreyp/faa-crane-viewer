@@ -87,11 +87,10 @@ const SearchBar = ({ defaultAddress, defaultRadius, onSearch, loading }) => {
       <SearchContainer>
         <Input
           type="text"
-          placeholder="Enter address (e.g. 10601 W Van Buren St, Tolleson, AZ 85353)"
+          placeholder="Enter address (e.g. 10601 W Van Buren St, Tolleson, AZ 85353 or City, State)"
           value={address}
           onChange={(e) => setAddress(e.target.value)}
           required
-          readOnly
         />
         <RadiusContainer>
           <RadiusLabel>Radius (NM):</RadiusLabel>

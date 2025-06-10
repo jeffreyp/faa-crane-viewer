@@ -4,6 +4,7 @@ import MapView from './components/MapView';
 import TableView from './components/TableView';
 import SearchBar from './components/SearchBar';
 import { fetchCraneData } from './services/faaService';
+import { geocodeAddress, formatDisplayAddress, isWithinContinentalUS } from './services/geocodingService';
 
 const AppContainer = styled.div`
   display: flex;
@@ -74,11 +75,40 @@ const App = () => {
     }
   };
 
-  const handleSearch = (address, radius) => {
-    // In a real app, we would geocode the address here
-    // For now, we'll keep using the same location but update the radius
-    setRadius(radius);
-    searchCranes(location, radius);
+  const handleSearch = async (address, radius) => {
+    console.log('Search initiated:', { address, radius });
+    setLoading(true);
+    setError(null);
+    
+    try {
+      // Geocode the address
+      console.log('Geocoding address:', address);
+      const geocodeResult = await geocodeAddress(address);
+      console.log('Geocode result:', geocodeResult);
+      
+      // Validate the result is within the continental US
+      if (!isWithinContinentalUS(geocodeResult.latitude, geocodeResult.longitude)) {
+        throw new Error('Address must be within the continental United States.');
+      }
+      
+      // Update location with geocoded coordinates
+      const newLocation = {
+        lat: geocodeResult.latitude,
+        lng: geocodeResult.longitude,
+        address: formatDisplayAddress(geocodeResult)
+      };
+      
+      setLocation(newLocation);
+      setRadius(radius);
+      
+      // Search for cranes at the new location
+      await searchCranes(newLocation, radius);
+      
+    } catch (err) {
+      setError(`Geocoding failed: ${err.message}`);
+      console.error('Geocoding error:', err);
+      setLoading(false);
+    }
   };
 
   return (
@@ -86,7 +116,7 @@ const App = () => {
       <Header>
         <Title>FAA Construction Crane Viewer</Title>
         <SearchBar 
-          defaultAddress={location.address} 
+          defaultAddress="10601 W Van Buren St, Tolleson, AZ 85353"
           defaultRadius={radius} 
           onSearch={handleSearch} 
           loading={loading}
