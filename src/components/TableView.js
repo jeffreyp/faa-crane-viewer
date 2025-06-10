@@ -28,13 +28,24 @@ const TableHeader = styled.th`
 `;
 
 const TableRow = styled.tr`
+  cursor: pointer;
+  
   &:nth-child(even) {
     background-color: #f8f8f8;
   }
   
   &:hover {
-    background-color: #f0f0f0;
+    background-color: #e8f4fd;
   }
+  
+  ${props => props.selected && `
+    background-color: #007acc !important;
+    color: white;
+    
+    &:hover {
+      background-color: #005a9e !important;
+    }
+  `}
 `;
 
 const TableCell = styled.td`
@@ -78,7 +89,7 @@ const LoadingSpinner = styled.div`
   }
 `;
 
-const TableView = ({ cranes, loading }) => {
+const TableView = ({ cranes, loading, selectedCraneId, onCraneSelect }) => {
   const [sortField, setSortField] = useState('id');
   const [sortDirection, setSortDirection] = useState('asc');
   
@@ -145,7 +156,11 @@ const TableView = ({ cranes, loading }) => {
         </thead>
         <tbody>
           {sortedCranes.map(crane => (
-            <TableRow key={crane.id}>
+            <TableRow 
+              key={crane.id}
+              selected={selectedCraneId === crane.id}
+              onClick={() => onCraneSelect(crane.id)}
+            >
               {columns.map(column => (
                 <TableCell key={`${crane.id}-${column.field}`}>
                   {column.field === 'height' 

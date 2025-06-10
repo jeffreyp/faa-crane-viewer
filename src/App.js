@@ -40,6 +40,7 @@ const App = () => {
   const [cranes, setCranes] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
+  const [selectedCraneId, setSelectedCraneId] = useState(null);
   const [location, setLocation] = useState({
     lat: 33.448037, // Southeast corner of S 107th Ave and W Van Buren St
     lng: -112.285957,
@@ -99,8 +100,8 @@ const App = () => {
         borderBottom: '1px solid #DDD'
       }}>{error}</div>}
       <ViewsContainer>
-        <MapView location={location} radius={radius} cranes={cranes} />
-        <TableView cranes={cranes} loading={loading} />
+        <MapView location={location} radius={radius} cranes={cranes} selectedCraneId={selectedCraneId} />
+        <TableView cranes={cranes} loading={loading} selectedCraneId={selectedCraneId} onCraneSelect={setSelectedCraneId} />
       </ViewsContainer>
     </AppContainer>
   );

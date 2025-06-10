@@ -30,7 +30,7 @@ const MapContainer = styled.div`
   }
 `;
 
-const MapView = ({ location, radius, cranes }) => {
+const MapView = ({ location, radius, cranes, selectedCraneId }) => {
   const mapRef = useRef(null);
   const mapInstanceRef = useRef(null);
   const geojsonLayerRef = useRef(null);
@@ -138,6 +138,9 @@ const MapView = ({ location, radius, cranes }) => {
             Dates: ${props.startDate} - ${props.endDate}<br/>
             Sponsor: ${props.sponsor}
           `);
+          
+          // Store reference to the layer for highlighting
+          layer.craneId = props.id;
         }
       }).addTo(mapInstanceRef.current);
       
@@ -153,6 +156,18 @@ const MapView = ({ location, radius, cranes }) => {
       }
     }
   }, [cranes]);
+
+  // Handle selected crane highlighting
+  useEffect(() => {
+    if (mapInstanceRef.current && geojsonLayerRef.current && selectedCraneId) {
+      // Find and open the popup for the selected crane
+      geojsonLayerRef.current.eachLayer((layer) => {
+        if (layer.craneId === selectedCraneId) {
+          layer.openPopup();
+        }
+      });
+    }
+  }, [selectedCraneId]);
 
   return <MapContainer ref={mapRef} />;
 };
