@@ -1,0 +1,42 @@
+name: Update FAA Data
+
+on:
+  schedule:
+    # Run daily at 6 AM UTC
+    - cron: '0 6 * * *'
+  workflow_dispatch: # Allow manual trigger
+
+jobs:
+  update-data:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+        
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install requests pandas
+        
+    - name: Download and process FAA data
+      run: python scripts/update_faa_data.py
+      
+    - name: Check for changes
+      id: git-check
+      run: |
+        git diff --exit-code public/data/datafile.csv || echo "changed=true" >> $GITHUB_OUTPUT
+        
+    - name: Commit and push changes
+      if: steps.git-check.outputs.changed == 'true'
+      run: |
+        git config --local user.email "action@github.com"
+        git config --local user.name "GitHub Action"
+        git add public/data/datafile.csv
+        git commit -m "Update FAA obstacle data - $(date +'%Y-%m-%d')"
+        git push
