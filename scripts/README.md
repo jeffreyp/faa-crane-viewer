@@ -28,7 +28,7 @@ This may result in fewer records than the original manual dataset, but ensures h
 ## GitHub Actions Workflow
 
 The `.github/workflows/update-faa-data.yml` workflow automatically:
-- Runs every Sunday at 6 AM UTC
+- Runs daily at 6 AM UTC
 - Downloads the latest FAA DOF data
 - Converts it to match the existing datafile.csv format
 - Commits and pushes changes if data has been updated
