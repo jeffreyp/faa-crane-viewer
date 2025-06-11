@@ -2,7 +2,7 @@
 
 An entirely vibe-coded web application that displays construction cranes within a 10 nautical mile radius of a specified location, using the FAA's [Daily Digital Obstacle File](https://www.faa.gov/air_traffic/flight_info/aeronav/digital_products/dailydof/).
 
-See [demo page](https://jeffreyp.github.io/faa-crane-viewer). The data used for this website is refreshed daily at 06:00 UTC. The update process is documented [here](https://github.com/jeffreyp/faa-crane-viewer/blob/main/scripts/README.md).
+See [demo page](https://jeffreyp.github.io/faa-crane-viewer). The data used by this website is refreshed daily at 06:00 UTC. The update process is documented [here](https://github.com/jeffreyp/faa-crane-viewer/blob/main/scripts/README.md).
 
 ## Features
 
