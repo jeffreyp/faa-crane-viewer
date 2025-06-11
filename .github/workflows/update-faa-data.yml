@@ -1,5 +1,9 @@
 name: Update FAA Data
 
+permissions:
+  contents: write
+  pages: write
+
 on:
   schedule:
     # Run daily at 6 AM UTC
