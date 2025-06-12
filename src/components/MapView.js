@@ -5,7 +5,7 @@ import { cranesToGeoJson, RADIUS_NM_TO_METERS } from '../services/faaService';
 
 // Create custom crane icon
 const craneIcon = L.icon({
-  iconUrl: 'https://cdn-icons-png.flaticon.com/512/2088/2088708.png',
+  iconUrl: 'https://cdn-icons-png.flaticon.com/512/149/149059.png',
   iconSize: [30, 30],
   iconAnchor: [15, 30],
   popupAnchor: [0, -30]
