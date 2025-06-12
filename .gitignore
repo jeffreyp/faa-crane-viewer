@@ -1,7 +1,6 @@
 ./claude/
 /node_modules/
 
-package-lock.json
 .DS_Store
 .vscode
 # Don't commit the old vanilla JS app.js file
