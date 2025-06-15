@@ -1,6 +1,6 @@
 # FAA Construction Crane Viewer
 
-An entirely vibe-coded web application that displays construction cranes within a 10 nautical mile radius of a specified location.
+An entirely vibe-coded web application that displays construction cranes within a user-specified nautical mile radius of a US address/location.
 
 See [demo page](https://jeffreyp.github.io/faa-crane-viewer). 
 
