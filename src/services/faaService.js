@@ -44,8 +44,7 @@ const parseCSVData = async (csvData) => {
         const craneData = results.data.filter(entry => {
           // Look for entries with "CRANE" in the STRUCTURE TYPE field
           return entry['STRUCTURE TYPE'] && 
-                 (entry['STRUCTURE TYPE'].includes('CRANE') || 
-                  (entry['STRUCTURE TYPE'].startsWith('CRANE')));
+                 entry['STRUCTURE TYPE'].toUpperCase().includes('CRANE');
         });
         
         console.log(`Found ${craneData.length} crane entries in CSV`);
@@ -56,9 +55,14 @@ const parseCSVData = async (csvData) => {
           const startDate = entry['WORK SCHEDULE BEGINNING DATE'] || entry['ENTERED DATE'] || '';
           const endDate = entry['WORK SCHEDULE ENDING DATE'] || entry['EXPIRATION DATE'] || '';
           
-          // Parse coordinates from DMS to decimal
-          const latitude = dmsToDecimal(entry['LATITUDE']);
-          const longitude = dmsToDecimal(entry['LONGITUTDE']); // CSV header has typo, but we match it
+          // Parse coordinates - they are already in decimal format
+          const latitude = parseFloat(entry['LATITUDE']);
+          const longitude = parseFloat(entry['LONGITUDE']);
+          
+          // Skip entries with invalid coordinates
+          if (isNaN(latitude) || isNaN(longitude)) {
+            return null;
+          }
           
           // Get height from either AGL HEIGHT PROPOSED or AGL HEIGHT DET
           const height = parseInt(entry['AGL HEIGHT PROPOSED'] || entry['AGL HEIGHT DET'] || '0');
@@ -77,7 +81,7 @@ const parseCSVData = async (csvData) => {
             city: entry['STRUCTURE CITY'] || '',
             state: entry['STRUCTURE STATE'] || ''
           };
-        });
+        }).filter(entry => entry !== null); // Remove entries with invalid coordinates
         
         console.log(`Transformed ${transformedData.length} crane entries`);
         resolve(transformedData);
