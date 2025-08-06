@@ -55,12 +55,12 @@ const parseCSVData = async (csvData) => {
           const startDate = entry['WORK SCHEDULE BEGINNING DATE'] || entry['ENTERED DATE'] || '';
           const endDate = entry['WORK SCHEDULE ENDING DATE'] || entry['EXPIRATION DATE'] || '';
           
-          // Parse coordinates - they are already in decimal format
-          const latitude = parseFloat(entry['LATITUDE']);
-          const longitude = parseFloat(entry['LONGITUDE']);
+          // Parse coordinates from DMS format using the dmsToDecimal function
+          const latitude = dmsToDecimal(entry['LATITUDE']);
+          const longitude = dmsToDecimal(entry['LONGITUTDE']); // Note: CSV has typo in column name
           
           // Skip entries with invalid coordinates
-          if (isNaN(latitude) || isNaN(longitude)) {
+          if (latitude === null || longitude === null) {
             return null;
           }
           
