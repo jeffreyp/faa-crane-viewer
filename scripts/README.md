@@ -4,8 +4,9 @@ This directory contains scripts to automate the download and processing of FAA o
 
 ## Files
 
-- `update_faa_data.py` - Main script that downloads FAA Digital Obstacle File (DOF) and converts to the format used by the crane viewer
-- `test_faa_download.py` - Test script to verify FAA download functionality (uses only built-in Python modules)
+- `update_faa_data.py` - Python script that downloads both FAA Digital Obstacle File (DOF) and Part 77 regional data, then merges and converts to the format used by the crane viewer
+- `download-faa-data.js` - Node.js script to download FAA Part 77 regional data files from all 9 FAA regions
+- `merge-faa-data.js` - Node.js script to merge the original datafile.csv with downloaded regional data and create consolidated files
 
 ## Background
 
@@ -35,12 +36,7 @@ The `.github/workflows/update-faa-data.yml` workflow automatically:
 
 ## Manual Testing
 
-To test the download functionality locally:
-
-```bash
-python3 scripts/test_faa_download.py
-```
-
+### Python Script
 To run the full update process (requires pandas and requests):
 
 ```bash
@@ -48,22 +44,43 @@ pip install requests pandas
 python3 scripts/update_faa_data.py
 ```
 
+### Node.js Scripts
+To download regional data using Node.js:
+
+```bash
+npm install  # if packages aren't installed
+node scripts/download-faa-data.js
+```
+
+To merge data using Node.js:
+
+```bash
+npm install papaparse  # if not already installed
+node scripts/merge-faa-data.js
+```
+
 ## Data Format Conversion
 
-The script converts from the DOF format to the existing datafile.csv format:
+The scripts handle multiple data sources:
 
-**DOF Format:** OAS, VERIFIED STATUS, COUNTRY, STATE, CITY, LATDEC, LONDEC, etc.
+### Python Script (`update_faa_data.py`)
+- **DOF Format:** OAS, VERIFIED STATUS, COUNTRY, STATE, CITY, LATDEC, LONDEC, TYPE, AGL, AMSL, etc.
+- **Part 77 Format:** Already compatible with crane viewer format
+- **Output:** Merged datafile.csv with both DOF and Part 77 data
 
-**Crane Viewer Format:** STUDY (ASN), STATUS, DETERMINATION, LATITUDE, LONGITUDE, etc.
+### Node.js Scripts
+- **download-faa-data.js:** Downloads Part 77 regional files from all 9 FAA regions
+- **merge-faa-data.js:** Merges original datafile.csv with regional data, handles coordinate conversion (DMS to decimal), and creates both merged-faa-data.csv (all structures) and merged-cranes-only.csv (cranes only)
 
 The conversion maps compatible fields and sets appropriate defaults for missing data.
 
 ## Customizing the Filtering
 
-If you need to adjust which obstacles are included, modify the filtering logic in `update_faa_data.py`:
+### Python Script (`update_faa_data.py`)
+To adjust which obstacles are included from DOF data, modify the filtering logic around line 212:
 
 ```python
-# Current filtering (line ~75):
+# Current DOF filtering:
 crane_keywords = ['CRANE']
 crane_mask = dof_df['TYPE'].str.contains('|'.join(crane_keywords), case=False, na=False)
 
@@ -71,4 +88,21 @@ crane_mask = dof_df['TYPE'].str.contains('|'.join(crane_keywords), case=False, n
 crane_keywords = ['CRANE', 'TOWER', 'BUILDING']  # Example: include towers and buildings
 ```
 
-You can also adjust the temporary/mobile equipment filters in the same section of the script.
+For Part 77 data filtering, modify around line 161:
+
+```python
+# Current Part 77 filtering:
+crane_keywords = ['CRANE', 'MOBILE CRANE', 'TOWER CRANE', 'CONSTRUCTION CRANE']
+construction_keywords = ['CONSTRUCTION', 'MOBILE', 'EQUIPMENT', 'VEHICLE']
+```
+
+### JavaScript Script (`merge-faa-data.js`)
+To adjust crane detection in the merge script, modify the `isCraneRelated` function around line 156:
+
+```javascript
+// Current filtering:
+const craneKeywords = ['CRANE', 'MOBILE CRANE', 'TOWER CRANE', 'CONSTRUCTION CRANE'];
+
+// To include more keywords:
+const craneKeywords = ['CRANE', 'TOWER', 'MOBILE CRANE', 'CONSTRUCTION CRANE', 'BOOM'];
+```
