@@ -5,12 +5,18 @@ import Papa from 'papaparse';
 //const CSV_PATH = 'data/OffAirportAWP2025List.csv';
 const CSV_PATH = 'data/datafile.csv';
 
-// Convert DMS (Degrees-Minutes-Seconds) to decimal degrees
-const dmsToDecimal = (dmsStr) => {
-  if (!dmsStr) return null;
+// Convert DMS (Degrees-Minutes-Seconds) to decimal degrees or return decimal if already in decimal format
+const coordinateToDecimal = (coordStr) => {
+  if (!coordStr) return null;
   
-  // Example format: "33 - 27 - 28.73 N"
-  const parts = dmsStr.split('-').map(part => part.trim());
+  // Check if it's already a decimal number (Part77 format)
+  const decimal = parseFloat(coordStr);
+  if (!isNaN(decimal) && (coordStr.match(/^-?\d+(\.\d+)?$/) || coordStr.match(/^-?\d+$/))) {
+    return decimal;
+  }
+  
+  // Handle DMS format: "33 - 27 - 28.73 N"
+  const parts = coordStr.split('-').map(part => part.trim());
   if (parts.length !== 3) return null;
   
   const degrees = parseFloat(parts[0]);
@@ -22,14 +28,14 @@ const dmsToDecimal = (dmsStr) => {
   const direction = secondsParts[1];
   
   // Calculate decimal degrees
-  let decimal = degrees + (minutes / 60) + (seconds / 3600);
+  let result = degrees + (minutes / 60) + (seconds / 3600);
   
   // Adjust sign based on direction
   if (direction === 'S' || direction === 'W') {
-    decimal = -decimal;
+    result = -result;
   }
   
-  return decimal;
+  return result;
 };
 
 // Parse CSV data and return crane data
@@ -55,9 +61,10 @@ const parseCSVData = async (csvData) => {
           const startDate = entry['WORK SCHEDULE BEGINNING DATE'] || entry['ENTERED DATE'] || '';
           const endDate = entry['WORK SCHEDULE ENDING DATE'] || entry['EXPIRATION DATE'] || '';
           
-          // Parse coordinates from DMS format using the dmsToDecimal function
-          const latitude = dmsToDecimal(entry['LATITUDE']);
-          const longitude = dmsToDecimal(entry['LONGITUTDE']); // Note: CSV has typo in column name
+          // Parse coordinates - handle both DMS and decimal formats from both data sources
+          const latitude = coordinateToDecimal(entry['LATITUDE']);
+          // Check both column names for longitude (DOF has typo "LONGITUTDE", Part77 has "LONGITUDE")
+          const longitude = coordinateToDecimal(entry['LONGITUDE'] || entry['LONGITUTDE']);
           
           // Skip entries with invalid coordinates
           if (latitude === null || longitude === null) {
