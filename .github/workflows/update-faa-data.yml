@@ -9,6 +9,8 @@ on:
 jobs:
   update-data:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     
     steps:
     - name: Checkout repository
@@ -31,7 +33,12 @@ jobs:
       id: git-check
       run: |
         git diff --exit-code public/data/datafile.csv || echo "changed=true" >> $GITHUB_OUTPUT
-        
+
+    - name: Configure Git remote
+      if: steps.git-check.outputs.changed == 'true'
+      run: |
+        git remote set-url origin https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git
+    
     - name: Commit and push changes
       if: steps.git-check.outputs.changed == 'true'
       run: |
