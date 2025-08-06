@@ -25,16 +25,43 @@ def download_faa_dof():
 def extract_csv_from_zip(zip_content):
     """Extract CSV data from the ZIP file."""
     with zipfile.ZipFile(io.BytesIO(zip_content)) as z:
-        # Find the CSV file in the zip
-        csv_files = [f for f in z.namelist() if f.endswith('.csv')]
-        if not csv_files:
-            raise ValueError("No CSV file found in the ZIP archive")
+        print(f"Files in ZIP archive: {z.namelist()}")
         
-        csv_file = csv_files[0]
-        print(f"Extracting {csv_file}...")
+        # Look for different file types the FAA might use
+        csv_files = [f for f in z.namelist() if f.lower().endswith('.csv')]
+        txt_files = [f for f in z.namelist() if f.lower().endswith('.txt')]
+        dat_files = [f for f in z.namelist() if f.lower().endswith('.dat')]
         
-        with z.open(csv_file) as f:
-            return pd.read_csv(f, low_memory=False)
+        # Try CSV files first
+        if csv_files:
+            csv_file = csv_files[0]
+            print(f"Extracting CSV file: {csv_file}...")
+            with z.open(csv_file) as f:
+                return pd.read_csv(f, low_memory=False)
+        
+        # Try TXT files (often CSV format)
+        elif txt_files:
+            txt_file = txt_files[0]
+            print(f"Extracting TXT file as CSV: {txt_file}...")
+            with z.open(txt_file) as f:
+                return pd.read_csv(f, low_memory=False)
+        
+        # Try DAT files (also often CSV format)
+        elif dat_files:
+            dat_file = dat_files[0]
+            print(f"Extracting DAT file as CSV: {dat_file}...")
+            with z.open(dat_file) as f:
+                return pd.read_csv(f, low_memory=False)
+        
+        # If no recognizable files, try the first file
+        elif z.namelist():
+            first_file = z.namelist()[0]
+            print(f"No CSV/TXT/DAT found, trying first file: {first_file}...")
+            with z.open(first_file) as f:
+                return pd.read_csv(f, low_memory=False)
+        
+        else:
+            raise ValueError("No files found in the ZIP archive")
 
 def decimal_to_dms(decimal_deg, is_longitude=False):
     """Convert decimal degrees to DMS format expected by the website."""
