@@ -58,7 +58,7 @@ def extract_part77_csv(content):
         try:
             csv_content = gzip.decompress(content)
             print("Successfully decompressed gzipped content")
-            return pd.read_csv(io.StringIO(csv_content.decode('utf-8')), low_memory=False, quoting=1, skipinitialspace=True, on_bad_lines='skip')
+            content_str = csv_content.decode('utf-8')
         except gzip.BadGzipFile:
             # Not a gzip file, try as plain text
             print("Content is not gzipped, trying as plain CSV")
@@ -68,8 +68,18 @@ def extract_part77_csv(content):
             if content_str.strip().startswith('<!DOCTYPE') or content_str.strip().startswith('<html'):
                 print("Received HTML response (likely error page)")
                 return None
+        
+        # Use more robust CSV parsing parameters to handle JSON and special characters
+        return pd.read_csv(
+            io.StringIO(content_str), 
+            quoting=1,  # QUOTE_ALL
+            skipinitialspace=True, 
+            on_bad_lines='skip',
+            engine='python',  # More robust parser
+            escapechar='\\',  # Handle escaped characters
+            doublequote=True  # Handle double quotes in fields
+        )
                 
-            return pd.read_csv(io.StringIO(content_str), low_memory=False, quoting=1, skipinitialspace=True, on_bad_lines='skip')
     except Exception as e:
         print(f"Error extracting Part 77 CSV: {e}")
         # Show first 200 characters to debug
@@ -292,8 +302,15 @@ def save_datafile(df, output_path):
     """Save the dataframe to the datafile.csv location."""
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
     
-    # Save with the same format as original (no index)
-    df.to_csv(output_path, index=False)
+    # Save with robust CSV formatting to handle JSON and special characters
+    df.to_csv(
+        output_path, 
+        index=False,
+        quoting=1,  # QUOTE_ALL - quotes all fields
+        escapechar='\\',  # Escape special characters
+        doublequote=True,  # Handle double quotes properly
+        lineterminator='\n'  # Use consistent line endings
+    )
     print(f"Saved updated data to {output_path}")
 
 def merge_dataframes(dof_df, part77_dfs):
@@ -305,18 +322,49 @@ def merge_dataframes(dof_df, part77_dfs):
         all_dfs.append(dof_df)
         print(f"Including {len(dof_df)} DOF records")
     
-    # Add Part 77 data
+    # Add Part 77 data and track regional statistics
+    regional_stats = {}
+    arizona_count_before = 0
+    
     for df in part77_dfs:
         if df is not None and not df.empty:
             all_dfs.append(df)
-            print(f"Including {len(df)} Part 77 records")
+            
+            # Track Arizona entries for validation
+            if 'DATA_SOURCE' in df.columns and 'STRUCTURE STATE' in df.columns:
+                source = df['DATA_SOURCE'].iloc[0] if len(df) > 0 else 'Unknown'
+                arizona_in_region = len(df[df['STRUCTURE STATE'] == 'AZ']) if 'STRUCTURE STATE' in df.columns else 0
+                arizona_count_before += arizona_in_region
+                regional_stats[source] = {'total': len(df), 'arizona': arizona_in_region}
+                print(f"Including {len(df)} Part 77 records from {source} ({arizona_in_region} Arizona entries)")
+            else:
+                print(f"Including {len(df)} Part 77 records")
     
     if not all_dfs:
         print("No data to merge!")
         return pd.DataFrame()
     
-    # Combine all dataframes
-    merged_df = pd.concat(all_dfs, ignore_index=True, sort=False)
+    # Combine all dataframes with error handling
+    try:
+        merged_df = pd.concat(all_dfs, ignore_index=True, sort=False)
+        print(f"Successfully merged {len(merged_df)} total records")
+    except Exception as e:
+        print(f"Error during merge: {e}")
+        # Try alternative merge approach
+        print("Attempting alternative merge approach...")
+        merged_df = pd.DataFrame()
+        for df in all_dfs:
+            merged_df = pd.concat([merged_df, df], ignore_index=True, sort=False)
+        print(f"Alternative merge completed: {len(merged_df)} records")
+    
+    # Validate Arizona entries are preserved
+    arizona_count_after = 0
+    if 'STRUCTURE STATE' in merged_df.columns:
+        arizona_count_after = len(merged_df[merged_df['STRUCTURE STATE'] == 'AZ'])
+        print(f"Arizona entries: {arizona_count_before} before merge, {arizona_count_after} after merge")
+        
+        if arizona_count_after < arizona_count_before:
+            print(f"WARNING: Lost {arizona_count_before - arizona_count_after} Arizona entries during merge!")
     
     # Remove duplicates based on STUDY (ASN) if available
     if 'STUDY (ASN)' in merged_df.columns:
@@ -324,6 +372,11 @@ def merge_dataframes(dof_df, part77_dfs):
         merged_df = merged_df.drop_duplicates(subset=['STUDY (ASN)'], keep='first')
         after_dedup = len(merged_df)
         print(f"Removed {before_dedup - after_dedup} duplicate records based on STUDY (ASN)")
+        
+        # Recheck Arizona count after deduplication
+        if 'STRUCTURE STATE' in merged_df.columns:
+            arizona_final = len(merged_df[merged_df['STRUCTURE STATE'] == 'AZ'])
+            print(f"Arizona entries after deduplication: {arizona_final}")
     
     print(f"Final merged dataset: {len(merged_df)} total records")
     return merged_df
@@ -350,24 +403,71 @@ def main():
         print("\n=== Processing Part 77 Regional Data ===")
         part77_dfs = []
         
-        for region in FAA_REGIONS:
-            try:
-                content = download_part77_region(region)
-                if content:
-                    part77_df = extract_part77_csv(content)
-                    if part77_df is not None and not part77_df.empty:
-                        converted_df = convert_part77_to_datafile_format(part77_df, region)
-                        if not converted_df.empty:
-                            part77_dfs.append(converted_df)
-                            print(f"Successfully processed {region}: {len(converted_df)} records")
+        # First try to use local regional files if they exist
+        local_data_path = "public/data/regions"
+        if os.path.exists(local_data_path):
+            print("Using local regional files...")
+            for region in FAA_REGIONS:
+                try:
+                    local_file = f"{local_data_path}/OffAirport{region}2025List.csv"
+                    if os.path.exists(local_file):
+                        print(f"Processing local {region} file: {local_file}")
+                        part77_df = pd.read_csv(
+                            local_file,
+                            quoting=1,  # QUOTE_ALL
+                            skipinitialspace=True,
+                            on_bad_lines='skip',
+                            engine='python'
+                        )
+                        if part77_df is not None and not part77_df.empty:
+                            converted_df = convert_part77_to_datafile_format(part77_df, region)
+                            if not converted_df.empty:
+                                part77_dfs.append(converted_df)
+                                print(f"Successfully processed {region}: {len(converted_df)} records")
+                            else:
+                                print(f"No crane records found in {region}")
                         else:
-                            print(f"No crane records found in {region}")
+                            print(f"Failed to load local data for {region}")
                     else:
-                        print(f"Failed to extract data for {region}")
-                else:
-                    print(f"Failed to download data for {region}")
-            except Exception as e:
-                print(f"Error processing {region}: {e}")
+                        print(f"Local file not found for {region}, trying download...")
+                        # Fall back to download
+                        content = download_part77_region(region)
+                        if content:
+                            part77_df = extract_part77_csv(content)
+                            if part77_df is not None and not part77_df.empty:
+                                converted_df = convert_part77_to_datafile_format(part77_df, region)
+                                if not converted_df.empty:
+                                    part77_dfs.append(converted_df)
+                                    print(f"Successfully processed {region}: {len(converted_df)} records")
+                                else:
+                                    print(f"No crane records found in {region}")
+                            else:
+                                print(f"Failed to extract data for {region}")
+                        else:
+                            print(f"Failed to download data for {region}")
+                except Exception as e:
+                    print(f"Error processing {region}: {e}")
+        else:
+            # Fall back to downloading if no local files
+            print("No local regional files found, downloading...")
+            for region in FAA_REGIONS:
+                try:
+                    content = download_part77_region(region)
+                    if content:
+                        part77_df = extract_part77_csv(content)
+                        if part77_df is not None and not part77_df.empty:
+                            converted_df = convert_part77_to_datafile_format(part77_df, region)
+                            if not converted_df.empty:
+                                part77_dfs.append(converted_df)
+                                print(f"Successfully processed {region}: {len(converted_df)} records")
+                            else:
+                                print(f"No crane records found in {region}")
+                        else:
+                            print(f"Failed to extract data for {region}")
+                    else:
+                        print(f"Failed to download data for {region}")
+                except Exception as e:
+                    print(f"Error processing {region}: {e}")
         
         # Merge all data
         print("\n=== Merging All Data ===")
