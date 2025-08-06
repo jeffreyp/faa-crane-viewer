@@ -7,10 +7,26 @@ the current datafile.csv format used by the crane viewer application.
 
 import requests
 import zipfile
+import gzip
 import pandas as pd
 import io
 import os
 from datetime import datetime
+import tempfile
+from pathlib import Path
+
+# FAA Region codes for Part 77 data
+FAA_REGIONS = [
+    'AAL',  # Alaska
+    'ACE',  # Central
+    'AEA',  # Eastern
+    'AGL',  # Great Lakes
+    'ANM',  # Northwest Mountain
+    'ANE',  # New England
+    'ASO',  # Southern
+    'ASW',  # Southwest
+    'AWP'   # Western Pacific
+]
 
 def download_faa_dof():
     """Download the latest FAA Digital Obstacle File (DOF) CSV."""
@@ -21,6 +37,48 @@ def download_faa_dof():
     response.raise_for_status()
     
     return response.content
+
+def download_part77_region(region_code):
+    """Download Part 77 data for a specific region."""
+    url = f"https://oeaaa.faa.gov/oeaaa/oe3a-external-api/downloadArchives.do?fname=OffAirport{region_code}2025List.gzip"
+    
+    print(f"Downloading Part 77 data for {region_code} region from {url}...")
+    try:
+        response = requests.get(url, timeout=300)
+        response.raise_for_status()
+        return response.content
+    except requests.RequestException as e:
+        print(f"Failed to download {region_code} region data: {e}")
+        return None
+
+def extract_part77_csv(content):
+    """Extract CSV data from Part 77 data (may be gzipped or plain CSV)."""
+    try:
+        # First try to decompress as gzip
+        try:
+            csv_content = gzip.decompress(content)
+            print("Successfully decompressed gzipped content")
+            return pd.read_csv(io.StringIO(csv_content.decode('utf-8')), low_memory=False, quoting=1, skipinitialspace=True, on_bad_lines='skip')
+        except gzip.BadGzipFile:
+            # Not a gzip file, try as plain text
+            print("Content is not gzipped, trying as plain CSV")
+            content_str = content.decode('utf-8')
+            
+            # Check if it looks like HTML error page
+            if content_str.strip().startswith('<!DOCTYPE') or content_str.strip().startswith('<html'):
+                print("Received HTML response (likely error page)")
+                return None
+                
+            return pd.read_csv(io.StringIO(content_str), low_memory=False, quoting=1, skipinitialspace=True, on_bad_lines='skip')
+    except Exception as e:
+        print(f"Error extracting Part 77 CSV: {e}")
+        # Show first 200 characters to debug
+        try:
+            preview = content.decode('utf-8')[:200]
+            print(f"Content preview: {preview}")
+        except:
+            print(f"Raw content preview: {content[:200]}")
+        return None
 
 def extract_csv_from_zip(zip_content):
     """Extract CSV data from the ZIP file."""
@@ -80,6 +138,48 @@ def decimal_to_dms(decimal_deg, is_longitude=False):
         direction = 'S' if decimal_deg < 0 else 'N'
     
     return f"{degrees:02d} - {minutes:02d} - {seconds:05.2f} {direction}"
+
+def convert_part77_to_datafile_format(part77_df, region_code):
+    """Convert Part 77 regional data to datafile format."""
+    if part77_df is None or part77_df.empty:
+        return pd.DataFrame()
+    
+    print(f"Converting {len(part77_df)} Part 77 records from {region_code} region")
+    print(f"Part 77 columns: {list(part77_df.columns)}")
+    
+    # Filter for crane-related structures
+    crane_keywords = ['CRANE', 'MOBILE CRANE', 'TOWER CRANE', 'CONSTRUCTION CRANE']
+    structure_type_col = 'STRUCTURE TYPE' if 'STRUCTURE TYPE' in part77_df.columns else None
+    structure_name_col = 'STRUCTURE NAME' if 'STRUCTURE NAME' in part77_df.columns else None
+    proposal_desc_col = 'PROPOSAL DESCRIPTION' if 'PROPOSAL DESCRIPTION' in part77_df.columns else None
+    
+    crane_mask = pd.Series([False] * len(part77_df), index=part77_df.index)
+    
+    if structure_type_col:
+        type_mask = part77_df[structure_type_col].str.contains('|'.join(crane_keywords), case=False, na=False)
+        crane_mask = crane_mask | type_mask
+    if structure_name_col:
+        name_mask = part77_df[structure_name_col].str.contains('|'.join(crane_keywords), case=False, na=False)
+        crane_mask = crane_mask | name_mask
+    if proposal_desc_col:
+        desc_mask = part77_df[proposal_desc_col].str.contains('|'.join(crane_keywords), case=False, na=False)
+        crane_mask = crane_mask | desc_mask
+    
+    # Also include construction equipment and mobile structures
+    construction_keywords = ['CONSTRUCTION', 'MOBILE', 'EQUIPMENT', 'VEHICLE']
+    if structure_type_col:
+        construction_mask = part77_df[structure_type_col].str.contains('|'.join(construction_keywords), case=False, na=False)
+        crane_mask = crane_mask | construction_mask
+    
+    crane_df = part77_df[crane_mask].copy() if crane_mask.any() else part77_df.copy()
+    print(f"Found {len(crane_df)} crane/construction records in {region_code}")
+    
+    # Part 77 data is already in a compatible format, so we can use it directly
+    # Just add a source indicator
+    crane_df = crane_df.copy()
+    crane_df['DATA_SOURCE'] = f'Part77-{region_code}'
+    
+    return crane_df
 
 def convert_dof_to_datafile_format(dof_df):
     """
@@ -177,6 +277,9 @@ def convert_dof_to_datafile_format(dof_df):
         mask = ~result_df['STRUCTURE TYPE'].str.contains('CRANE', case=False, na=False)
         result_df.loc[mask, 'STRUCTURE TYPE'] = 'CRANE$MOBILE'
     
+    # Add source indicator
+    result_df['DATA_SOURCE'] = 'DOF'
+    
     # Filter out rows with missing critical data
     result_df = result_df.dropna(subset=['LATITUDE', 'LONGITUTDE'])
     result_df = result_df[result_df['LATITUDE'] != '']
@@ -193,24 +296,111 @@ def save_datafile(df, output_path):
     df.to_csv(output_path, index=False)
     print(f"Saved updated data to {output_path}")
 
+def merge_dataframes(dof_df, part77_dfs):
+    """Merge DOF data with Part 77 regional data."""
+    all_dfs = []
+    
+    # Add DOF data if available
+    if dof_df is not None and not dof_df.empty:
+        all_dfs.append(dof_df)
+        print(f"Including {len(dof_df)} DOF records")
+    
+    # Add Part 77 data
+    for df in part77_dfs:
+        if df is not None and not df.empty:
+            all_dfs.append(df)
+            print(f"Including {len(df)} Part 77 records")
+    
+    if not all_dfs:
+        print("No data to merge!")
+        return pd.DataFrame()
+    
+    # Combine all dataframes
+    merged_df = pd.concat(all_dfs, ignore_index=True, sort=False)
+    
+    # Remove duplicates based on STUDY (ASN) if available
+    if 'STUDY (ASN)' in merged_df.columns:
+        before_dedup = len(merged_df)
+        merged_df = merged_df.drop_duplicates(subset=['STUDY (ASN)'], keep='first')
+        after_dedup = len(merged_df)
+        print(f"Removed {before_dedup - after_dedup} duplicate records based on STUDY (ASN)")
+    
+    print(f"Final merged dataset: {len(merged_df)} total records")
+    return merged_df
+
 def main():
     """Main function to update FAA data."""
     try:
-        # Download the latest DOF data
-        zip_content = download_faa_dof()
+        all_dataframes = []
         
-        # Extract CSV from ZIP
-        dof_df = extract_csv_from_zip(zip_content)
-        print(f"Loaded {len(dof_df)} records from DOF")
+        # Download and process DOF data
+        print("=== Processing DOF Data ===")
+        try:
+            zip_content = download_faa_dof()
+            dof_df = extract_csv_from_zip(zip_content)
+            print(f"Loaded {len(dof_df)} records from DOF")
+            dof_converted = convert_dof_to_datafile_format(dof_df)
+            if not dof_converted.empty:
+                all_dataframes.append(dof_converted)
+        except Exception as e:
+            print(f"Error processing DOF data: {e}")
+            dof_converted = None
         
-        # Convert to datafile format
-        datafile_df = convert_dof_to_datafile_format(dof_df)
+        # Download and process Part 77 regional data
+        print("\n=== Processing Part 77 Regional Data ===")
+        part77_dfs = []
         
-        # Save the updated datafile
+        for region in FAA_REGIONS:
+            try:
+                content = download_part77_region(region)
+                if content:
+                    part77_df = extract_part77_csv(content)
+                    if part77_df is not None and not part77_df.empty:
+                        converted_df = convert_part77_to_datafile_format(part77_df, region)
+                        if not converted_df.empty:
+                            part77_dfs.append(converted_df)
+                            print(f"Successfully processed {region}: {len(converted_df)} records")
+                        else:
+                            print(f"No crane records found in {region}")
+                    else:
+                        print(f"Failed to extract data for {region}")
+                else:
+                    print(f"Failed to download data for {region}")
+            except Exception as e:
+                print(f"Error processing {region}: {e}")
+        
+        # Merge all data
+        print("\n=== Merging All Data ===")
+        merged_df = merge_dataframes(dof_converted, part77_dfs)
+        
+        if merged_df.empty:
+            print("No data to save!")
+            return
+        
+        # Save the merged datafile
         output_path = "public/data/datafile.csv"
-        save_datafile(datafile_df, output_path)
+        save_datafile(merged_df, output_path)
         
-        print("FAA data update completed successfully!")
+        # Also save individual crane and Part 77 files for analysis
+        if part77_dfs:
+            part77_only = pd.concat(part77_dfs, ignore_index=True)
+            part77_output = "public/data/part77-data.csv"
+            save_datafile(part77_only, part77_output)
+            print(f"Saved Part 77 data separately to {part77_output}")
+        
+        # Print summary statistics
+        print("\n=== Summary ===")
+        if 'DATA_SOURCE' in merged_df.columns:
+            source_counts = merged_df['DATA_SOURCE'].value_counts()
+            for source, count in source_counts.items():
+                print(f"  {source}: {count} records")
+        
+        # Crane analysis
+        if 'STRUCTURE TYPE' in merged_df.columns:
+            crane_records = merged_df[merged_df['STRUCTURE TYPE'].str.contains('CRANE', case=False, na=False)]
+            print(f"  Total crane-related records: {len(crane_records)}")
+        
+        print("\nFAA data update completed successfully!")
         
     except Exception as e:
         print(f"Error updating FAA data: {e}")
