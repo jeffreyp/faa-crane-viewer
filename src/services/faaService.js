@@ -2,8 +2,8 @@
 import Papa from 'papaparse';
 
 // Constants - using direct absolute path for webpack dev server
-//const CSV_PATH = 'data/OffAirportAWP2025List.csv';
-const CSV_PATH = 'data/datafile.csv';
+const DOF_CSV_PATH = 'data/datafile.csv';
+const PART77_CSV_PATH = 'data/part77-data.csv';
 
 // Convert DMS (Degrees-Minutes-Seconds) to decimal degrees or return decimal if already in decimal format
 const coordinateToDecimal = (coordStr) => {
@@ -46,11 +46,30 @@ const parseCSVData = async (csvData) => {
       complete: (results) => {
         console.log(`CSV parsed, total rows: ${results.data.length}`);
         
-        // Filter for crane entries
+        // Filter for crane entries - handle both DOF and Part77 formats
         const craneData = results.data.filter(entry => {
-          // Look for entries with "CRANE" in the STRUCTURE TYPE field
-          return entry['STRUCTURE TYPE'] && 
-                 entry['STRUCTURE TYPE'].toUpperCase().includes('CRANE');
+          // DOF format: Look for entries with "CRANE" in the STRUCTURE TYPE field
+          if (entry['STRUCTURE TYPE'] && 
+              entry['STRUCTURE TYPE'].toUpperCase().includes('CRANE')) {
+            return true;
+          }
+          
+          // Part77 format: Look for entries with "CRANE" in the STRUCTURE TYPE field
+          // Part77 data also has crane data marked differently sometimes
+          if (entry['STRUCTURE TYPE'] && 
+              entry['STRUCTURE TYPE'].includes('CRANE')) {
+            return true;
+          }
+          
+          // Additional check for Part77 format that might have CRANE in other fields
+          if ((entry['PROPOSAL DESCRIPTION'] && 
+               entry['PROPOSAL DESCRIPTION'].toUpperCase().includes('CRANE')) ||
+              (entry['STRUCTURE NAME'] && 
+               entry['STRUCTURE NAME'].toUpperCase().includes('CRANE'))) {
+            return true;
+          }
+          
+          return false;
         });
         
         console.log(`Found ${craneData.length} crane entries in CSV`);
@@ -74,6 +93,9 @@ const parseCSVData = async (csvData) => {
           // Get height from either AGL HEIGHT PROPOSED or AGL HEIGHT DET
           const height = parseInt(entry['AGL HEIGHT PROPOSED'] || entry['AGL HEIGHT DET'] || '0');
           
+          // Identify data source
+          const dataSource = entry['DATA_SOURCE'] || 'Unknown';
+          
           return {
             id: entry['STUDY (ASN)'] || '',
             structureType: 'Crane',
@@ -86,7 +108,8 @@ const parseCSVData = async (csvData) => {
             endDate: endDate,
             sponsor: entry['SPONSOR NAME'] || '',
             city: entry['STRUCTURE CITY'] || '',
-            state: entry['STRUCTURE STATE'] || ''
+            state: entry['STRUCTURE STATE'] || '',
+            dataSource: dataSource
           };
         }).filter(entry => entry !== null); // Remove entries with invalid coordinates
         
@@ -101,26 +124,56 @@ const parseCSVData = async (csvData) => {
   });
 };
 
-// Fetch crane data from local CSV file
+// Fetch crane data from both DOF and Part77 CSV files
 export const fetchCraneData = async (location, radiusNM) => {
   try {
-    // Fetch the CSV file
-    const response = await fetch(CSV_PATH);
-    if (!response.ok) {
-      throw new Error(`Failed to fetch CSV: ${response.status}`);
+    console.log('Fetching crane data from both DOF and Part77 sources...');
+    
+    // Fetch both CSV files in parallel
+    const [dofResponse, part77Response] = await Promise.all([
+      fetch(DOF_CSV_PATH),
+      fetch(PART77_CSV_PATH)
+    ]);
+    
+    if (!dofResponse.ok && !part77Response.ok) {
+      throw new Error(`Failed to fetch both CSV files: DOF ${dofResponse.status}, Part77 ${part77Response.status}`);
     }
     
-    const csvText = await response.text();
-    let craneData = await parseCSVData(csvText);
+    let allCraneData = [];
+    
+    // Process DOF data if available
+    if (dofResponse.ok) {
+      console.log('Processing DOF data...');
+      const dofText = await dofResponse.text();
+      const dofCranes = await parseCSVData(dofText);
+      allCraneData.push(...dofCranes);
+      console.log(`Loaded ${dofCranes.length} DOF cranes`);
+    } else {
+      console.warn('Failed to fetch DOF data:', dofResponse.status);
+    }
+    
+    // Process Part77 data if available
+    if (part77Response.ok) {
+      console.log('Processing Part77 data...');
+      const part77Text = await part77Response.text();
+      const part77Cranes = await parseCSVData(part77Text);
+      allCraneData.push(...part77Cranes);
+      console.log(`Loaded ${part77Cranes.length} Part77 cranes`);
+    } else {
+      console.warn('Failed to fetch Part77 data:', part77Response.status);
+    }
+    
+    console.log(`Total cranes loaded: ${allCraneData.length}`);
     
     // Filter data based on location and radius
     if (location && radiusNM) {
-      craneData = craneData.filter(crane => 
+      allCraneData = allCraneData.filter(crane => 
         isPointWithinRadius(location, crane, radiusNM)
       );
+      console.log(`Filtered to ${allCraneData.length} cranes within ${radiusNM}nm radius`);
     }
     
-    return { data: craneData, usedMockData: false };
+    return { data: allCraneData, usedMockData: false };
   } catch (error) {
     console.error('Error fetching crane data:', error);
     
@@ -170,7 +223,8 @@ export const cranesToGeoJson = (cranes) => {
         status: crane.status,
         startDate: crane.startDate,
         endDate: crane.endDate,
-        sponsor: crane.sponsor
+        sponsor: crane.sponsor,
+        dataSource: crane.dataSource
       },
       geometry: {
         type: "Point",

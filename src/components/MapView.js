@@ -136,7 +136,8 @@ const MapView = ({ location, radius, cranes, selectedCraneId, onCraneSelect }) =
             Height: ${props.height} ${props.heightUnit}<br/>
             Status: ${props.status}<br/>
             Dates: ${props.startDate} - ${props.endDate}<br/>
-            Sponsor: ${props.sponsor}
+            Sponsor: ${props.sponsor}<br/>
+            <small>Source: ${props.dataSource || 'Unknown'}</small>
           `);
           
           // Store reference to the layer for highlighting
