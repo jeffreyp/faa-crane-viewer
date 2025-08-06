@@ -223,7 +223,7 @@ def convert_dof_to_datafile_format(dof_df):
     output_columns = [
         'STUDY (ASN)', 'PRIOR ASN', 'STATUS', 'DETERMINATION', 'ENTERED DATE', 
         'RECEIVED DATE', 'COMPLETION DATE', 'EXPIRATION DATE', 'LATITUDE', 
-        'LONGITUTDE', 'HORIZONTAL DATUM', 'SURVEY_ACCURACY', 'MARKING LIGHTING TYPE', 
+        'LONGITUDE', 'HORIZONTAL DATUM', 'SURVEY_ACCURACY', 'MARKING LIGHTING TYPE', 
         'MARKING LIGHTING TYPE OTHER', 'STRUCTURE NAME', 'STRUCTURE CITY', 
         'STRUCTURE COUNTY NAME', 'STRUCTURE COUNTY ID', 'STRUCTURE STATE', 
         'NEAREST AIRPORT', 'DISTANCE FROM AIRPORT', 'DIRECTION FROM AIRPORT', 
@@ -254,11 +254,11 @@ def convert_dof_to_datafile_format(dof_df):
         # Convert decimal coordinates to DMS format
         if 'LATDEC' in crane_df.columns and 'LONDEC' in crane_df.columns:
             result_df['LATITUDE'] = crane_df['LATDEC'].apply(lambda x: decimal_to_dms(x, False))
-            result_df['LONGITUTDE'] = crane_df['LONDEC'].apply(lambda x: decimal_to_dms(x, True))
+            result_df['LONGITUDE'] = crane_df['LONDEC'].apply(lambda x: decimal_to_dms(x, True))
         elif 'DMSLAT' in crane_df.columns and 'DMSLON' in crane_df.columns:
             # Use existing DMS coordinates if available
             result_df['LATITUDE'] = crane_df['DMSLAT']
-            result_df['LONGITUTDE'] = crane_df['DMSLON']
+            result_df['LONGITUDE'] = crane_df['DMSLON']
         
         # Set default values for missing data
         result_df['STATUS'] = 'Determined'
@@ -281,9 +281,9 @@ def convert_dof_to_datafile_format(dof_df):
     result_df['DATA_SOURCE'] = 'DOF'
     
     # Filter out rows with missing critical data
-    result_df = result_df.dropna(subset=['LATITUDE', 'LONGITUTDE'])
+    result_df = result_df.dropna(subset=['LATITUDE', 'LONGITUDE'])
     result_df = result_df[result_df['LATITUDE'] != '']
-    result_df = result_df[result_df['LONGITUTDE'] != '']
+    result_df = result_df[result_df['LONGITUDE'] != '']
     
     print(f"Converted {len(result_df)} obstacle records to datafile format")
     return result_df

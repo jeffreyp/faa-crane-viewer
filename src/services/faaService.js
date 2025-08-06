@@ -63,8 +63,8 @@ const parseCSVData = async (csvData) => {
           
           // Parse coordinates - handle both DMS and decimal formats from both data sources
           const latitude = coordinateToDecimal(entry['LATITUDE']);
-          // Check both column names for longitude (DOF has typo "LONGITUTDE", Part77 has "LONGITUDE")
-          const longitude = coordinateToDecimal(entry['LONGITUDE'] || entry['LONGITUTDE']);
+          // Use LONGITUDE column (header was corrected from typo "LONGITUTDE")
+          const longitude = coordinateToDecimal(entry['LONGITUDE']);
           
           // Skip entries with invalid coordinates
           if (latitude === null || longitude === null) {
