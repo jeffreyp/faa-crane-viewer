@@ -402,72 +402,34 @@ def main():
         # Download and process Part 77 regional data
         print("\n=== Processing Part 77 Regional Data ===")
         part77_dfs = []
-        
-        # First try to use local regional files if they exist
-        local_data_path = "public/data/regions"
-        if os.path.exists(local_data_path):
-            print("Using local regional files...")
-            for region in FAA_REGIONS:
-                try:
-                    local_file = f"{local_data_path}/OffAirport{region}2025List.csv"
-                    if os.path.exists(local_file):
-                        print(f"Processing local {region} file: {local_file}")
-                        part77_df = pd.read_csv(
-                            local_file,
-                            quoting=1,  # QUOTE_ALL
-                            skipinitialspace=True,
-                            on_bad_lines='skip',
-                            engine='python'
-                        )
-                        if part77_df is not None and not part77_df.empty:
-                            converted_df = convert_part77_to_datafile_format(part77_df, region)
-                            if not converted_df.empty:
-                                part77_dfs.append(converted_df)
-                                print(f"Successfully processed {region}: {len(converted_df)} records")
-                            else:
-                                print(f"No crane records found in {region}")
+
+        # Always download fresh regional data to ensure we have the latest updates
+        print("Downloading fresh regional data...")
+        for region in FAA_REGIONS:
+            try:
+                content = download_part77_region(region)
+                if content:
+                    part77_df = extract_part77_csv(content)
+                    if part77_df is not None and not part77_df.empty:
+                        # Save the fresh regional data for reference
+                        local_data_path = "public/data/regions"
+                        os.makedirs(local_data_path, exist_ok=True)
+                        local_file = f"{local_data_path}/OffAirport{region}2025List.csv"
+                        part77_df.to_csv(local_file, index=False, quoting=1, escapechar='\\', doublequote=True)
+                        print(f"Saved fresh {region} data to {local_file}")
+
+                        converted_df = convert_part77_to_datafile_format(part77_df, region)
+                        if not converted_df.empty:
+                            part77_dfs.append(converted_df)
+                            print(f"Successfully processed {region}: {len(converted_df)} records")
                         else:
-                            print(f"Failed to load local data for {region}")
+                            print(f"No crane records found in {region}")
                     else:
-                        print(f"Local file not found for {region}, trying download...")
-                        # Fall back to download
-                        content = download_part77_region(region)
-                        if content:
-                            part77_df = extract_part77_csv(content)
-                            if part77_df is not None and not part77_df.empty:
-                                converted_df = convert_part77_to_datafile_format(part77_df, region)
-                                if not converted_df.empty:
-                                    part77_dfs.append(converted_df)
-                                    print(f"Successfully processed {region}: {len(converted_df)} records")
-                                else:
-                                    print(f"No crane records found in {region}")
-                            else:
-                                print(f"Failed to extract data for {region}")
-                        else:
-                            print(f"Failed to download data for {region}")
-                except Exception as e:
-                    print(f"Error processing {region}: {e}")
-        else:
-            # Fall back to downloading if no local files
-            print("No local regional files found, downloading...")
-            for region in FAA_REGIONS:
-                try:
-                    content = download_part77_region(region)
-                    if content:
-                        part77_df = extract_part77_csv(content)
-                        if part77_df is not None and not part77_df.empty:
-                            converted_df = convert_part77_to_datafile_format(part77_df, region)
-                            if not converted_df.empty:
-                                part77_dfs.append(converted_df)
-                                print(f"Successfully processed {region}: {len(converted_df)} records")
-                            else:
-                                print(f"No crane records found in {region}")
-                        else:
-                            print(f"Failed to extract data for {region}")
-                    else:
-                        print(f"Failed to download data for {region}")
-                except Exception as e:
-                    print(f"Error processing {region}: {e}")
+                        print(f"Failed to extract data for {region}")
+                else:
+                    print(f"Failed to download data for {region}")
+            except Exception as e:
+                print(f"Error processing {region}: {e}")
         
         # Merge all data
         print("\n=== Merging All Data ===")
