@@ -46,6 +46,7 @@ jobs:
         git config --local user.name "GitHub Action"
         git add public/data/datafile.csv
         git commit -m "Update FAA obstacle data - $(date +'%Y-%m-%d')"
+        git pull --rebase origin main
         git push
         
     - name: Set up Node.js
