@@ -48,11 +48,14 @@ jobs:
         git commit -m "Update FAA obstacle data - $(date +'%Y-%m-%d')"
 
         # Try to push, if it fails due to updates, pull and retry
-        if ! git push; then
+        set +e
+        git push
+        if [ $? -ne 0 ]; then
           echo "Push failed, pulling latest changes and retrying..."
           git pull --rebase origin main
           git push
         fi
+        set -e
         
     - name: Set up Node.js
       if: steps.git-check.outputs.changed == 'true'
