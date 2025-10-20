@@ -59,7 +59,10 @@ jobs:
         if [ $? -ne 0 ]; then
           echo "Push failed, pulling latest changes and retrying..."
 
-          # Stash any unstaged changes before pulling
+          # Add any additional unstaged changes that may have been created
+          git add public/data/datafile.csv public/data/part77-data.csv public/data/regions/*.csv
+
+          # Stash any changes (staged or unstaged)
           git stash --include-untracked
 
           # Pull with rebase
@@ -70,7 +73,7 @@ jobs:
             git stash pop
             # Re-add and commit any files that were stashed
             git add public/data/datafile.csv public/data/part77-data.csv public/data/regions/*.csv
-            if ! git diff --cached --quiet; then
+            if ! git diff --cached --quiet || ! git diff --quiet; then
               git commit --amend --no-edit
             fi
           fi
