@@ -164,10 +164,20 @@ export const fetchCraneData = async (location, radiusNM) => {
     }
     
     console.log(`Total cranes loaded: ${allCraneData.length}`);
-    
+
+    // Remove duplicates based on ID (same crane may appear in both DOF and Part77 data)
+    const uniqueCranes = new Map();
+    allCraneData.forEach(crane => {
+      if (crane.id && !uniqueCranes.has(crane.id)) {
+        uniqueCranes.set(crane.id, crane);
+      }
+    });
+    allCraneData = Array.from(uniqueCranes.values());
+    console.log(`After deduplication: ${allCraneData.length} unique cranes`);
+
     // Filter data based on location and radius
     if (location && radiusNM) {
-      allCraneData = allCraneData.filter(crane => 
+      allCraneData = allCraneData.filter(crane =>
         isPointWithinRadius(location, crane, radiusNM)
       );
       console.log(`Filtered to ${allCraneData.length} cranes within ${radiusNM}nm radius`);
