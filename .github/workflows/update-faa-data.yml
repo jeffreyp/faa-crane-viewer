@@ -97,6 +97,8 @@ jobs:
     - name: Build and deploy to GitHub Pages
       if: steps.git-check.outputs.changed == 'true' || github.event.inputs.force_deploy == 'true'
       run: |
+        git config --local user.email "action@github.com"
+        git config --local user.name "GitHub Action"
         npm run build
         npm run deploy
       env:
