@@ -58,7 +58,24 @@ jobs:
         git push
         if [ $? -ne 0 ]; then
           echo "Push failed, pulling latest changes and retrying..."
+
+          # Stash any unstaged changes before pulling
+          git stash --include-untracked
+
+          # Pull with rebase
           git pull --rebase origin main
+
+          # Pop stash if there were any changes
+          if git stash list | grep -q "stash@{0}"; then
+            git stash pop
+            # Re-add and commit any files that were stashed
+            git add public/data/datafile.csv public/data/part77-data.csv public/data/regions/*.csv
+            if ! git diff --cached --quiet; then
+              git commit --amend --no-edit
+            fi
+          fi
+
+          # Push again
           git push
         fi
         set -e
