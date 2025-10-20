@@ -38,7 +38,7 @@ jobs:
     - name: Check for changes
       id: git-check
       run: |
-        git diff --exit-code public/data/datafile.csv || echo "changed=true" >> $GITHUB_OUTPUT
+        git diff --exit-code public/data/ || echo "changed=true" >> $GITHUB_OUTPUT
 
     - name: Configure Git remote
       if: steps.git-check.outputs.changed == 'true'
@@ -50,7 +50,7 @@ jobs:
       run: |
         git config --local user.email "action@github.com"
         git config --local user.name "GitHub Action"
-        git add public/data/datafile.csv
+        git add public/data/datafile.csv public/data/part77-data.csv public/data/regions/*.csv
         git commit -m "Update FAA obstacle data - $(date +'%Y-%m-%d')"
 
         # Try to push, if it fails due to updates, pull and retry
