@@ -139,14 +139,14 @@ const MapView = ({ location, radius, cranes, selectedCraneId, onCraneSelect }) =
             Sponsor: ${props.sponsor}<br/>
             <small>Source: ${props.dataSource || 'Unknown'}</small>
           `);
-          
+
           // Store reference to the layer for highlighting
-          layer.craneId = props.id;
-          
+          layer.craneId = props.uniqueId;
+
           // Add click handler to select crane
           layer.on('click', () => {
             if (onCraneSelect) {
-              onCraneSelect(props.id);
+              onCraneSelect(props.uniqueId);
             }
           });
         }

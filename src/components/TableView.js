@@ -156,14 +156,14 @@ const TableView = ({ cranes, loading, selectedCraneId, onCraneSelect }) => {
         </thead>
         <tbody>
           {sortedCranes.map(crane => (
-            <TableRow 
-              key={crane.id}
-              selected={selectedCraneId === crane.id}
-              onClick={() => onCraneSelect(crane.id)}
+            <TableRow
+              key={crane.uniqueId}
+              selected={selectedCraneId === crane.uniqueId}
+              onClick={() => onCraneSelect(crane.uniqueId)}
             >
               {columns.map(column => (
-                <TableCell key={`${crane.id}-${column.field}`}>
-                  {column.field === 'height' 
+                <TableCell key={`${crane.uniqueId}-${column.field}`}>
+                  {column.field === 'height'
                     ? `${crane[column.field]} ft`
                     : crane[column.field]}
                 </TableCell>

@@ -96,8 +96,13 @@ const parseCSVData = async (csvData) => {
           // Identify data source
           const dataSource = entry['DATA_SOURCE'] || 'Unknown';
           
+          // Create a unique ID combining ASN and data source to avoid collisions
+          const asn = entry['STUDY (ASN)'] || '';
+          const uniqueId = asn ? `${asn}-${dataSource}` : `${latitude}-${longitude}-${height}-${dataSource}`;
+
           return {
-            id: entry['STUDY (ASN)'] || '',
+            id: asn, // Keep original ID for display
+            uniqueId: uniqueId, // Use for internal tracking
             structureType: 'Crane',
             latitude: latitude,
             longitude: longitude,
@@ -165,13 +170,15 @@ export const fetchCraneData = async (location, radiusNM) => {
     
     console.log(`Total cranes loaded: ${allCraneData.length}`);
 
-    // Remove duplicates based on ID (same crane may appear in both DOF and Part77 data)
+    // Remove duplicates based on uniqueId
     const uniqueCranes = new Map();
+
     allCraneData.forEach(crane => {
-      if (crane.id && !uniqueCranes.has(crane.id)) {
-        uniqueCranes.set(crane.id, crane);
+      if (!uniqueCranes.has(crane.uniqueId)) {
+        uniqueCranes.set(crane.uniqueId, crane);
       }
     });
+
     allCraneData = Array.from(uniqueCranes.values());
     console.log(`After deduplication: ${allCraneData.length} unique cranes`);
 
@@ -227,6 +234,7 @@ export const cranesToGeoJson = (cranes) => {
       type: "Feature",
       properties: {
         id: crane.id,
+        uniqueId: crane.uniqueId,
         structureType: crane.structureType,
         height: crane.height,
         heightUnit: crane.heightUnit,
