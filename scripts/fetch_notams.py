@@ -21,9 +21,11 @@ import requests
 import json
 import time
 import argparse
+import re
+import pandas as pd
 from datetime import datetime
 from urllib.parse import urlencode
-from typing import Dict, List, Tuple
+from typing import Dict, List, Tuple, Optional
 
 
 # Continental US boundaries (approximate)
@@ -411,6 +413,246 @@ def filter_crane_notams(notams: List[Dict]) -> List[Dict]:
     return filtered
 
 
+def decimal_to_dms_format(decimal_degrees: float, is_longitude: bool = False) -> str:
+    """
+    Convert decimal degrees to DMS format expected by the CSV.
+
+    Args:
+        decimal_degrees: Float like 33.448056 or -112.286111
+        is_longitude: True if this is a longitude value
+
+    Returns:
+        String like "33 - 26 - 53.00 N" or "112 - 17 - 10.00 W"
+    """
+    if decimal_degrees is None:
+        return ''
+
+    abs_deg = abs(decimal_degrees)
+    degrees = int(abs_deg)
+    minutes = int((abs_deg - degrees) * 60)
+    seconds = ((abs_deg - degrees) * 60 - minutes) * 60
+
+    # Determine direction
+    if is_longitude:
+        direction = 'W' if decimal_degrees < 0 else 'E'
+    else:
+        direction = 'S' if decimal_degrees < 0 else 'N'
+
+    return f"{degrees:02d} - {minutes:02d} - {seconds:05.2f} {direction}"
+
+
+def extract_height_from_text(text: str) -> Optional[int]:
+    """
+    Extract height in feet from NOTAM text.
+
+    Looks for patterns like:
+    - "203FT AGL"
+    - "(203FT AGL)"
+    - "203 feet"
+
+    Args:
+        text: NOTAM message text
+
+    Returns:
+        Height in feet as integer, or None if not found
+    """
+    if not text:
+        return None
+
+    # Look for patterns like "203FT AGL" or "203 feet"
+    patterns = [
+        r'(\d+)\s*FT\s+AGL',  # "203FT AGL"
+        r'\((\d+)FT\s+AGL\)',  # "(203FT AGL)"
+        r'<b>\s*AGL:\s*</b>\s*<td>(\d+)\s*feet',  # HTML table format
+    ]
+
+    for pattern in patterns:
+        match = re.search(pattern, text, re.IGNORECASE)
+        if match:
+            return int(match.group(1))
+
+    return None
+
+
+def parse_notam_coordinates(notam_geometry: str) -> Tuple[Optional[float], Optional[float]]:
+    """
+    Parse NOTAM geometry to extract lat/lng coordinates.
+
+    Args:
+        notam_geometry: JSON array string like "[-94.0207,29.9508]" or
+                       DMS string like "295943N0940206W"
+
+    Returns:
+        Tuple of (latitude, longitude) in decimal degrees, or (None, None)
+    """
+    if not notam_geometry:
+        return None, None
+
+    # Try parsing as JSON array first
+    try:
+        coords = json.loads(notam_geometry)
+        if isinstance(coords, list) and len(coords) == 2:
+            lon, lat = coords  # Note: GeoJSON is [lon, lat]
+            return lat, lon
+    except (json.JSONDecodeError, ValueError):
+        pass
+
+    # Try parsing DMS format like "295943N0940206W"
+    # Format: DDMMSSN/SDDDMMSSW/E
+    dms_pattern = r'(\d{6})([NS])(\d{7})([EW])'
+    match = re.match(dms_pattern, notam_geometry.replace(' ', ''))
+    if match:
+        lat_dms, lat_dir, lon_dms, lon_dir = match.groups()
+
+        # Parse latitude
+        lat_deg = int(lat_dms[0:2])
+        lat_min = int(lat_dms[2:4])
+        lat_sec = int(lat_dms[4:6])
+        lat_decimal = lat_deg + lat_min / 60 + lat_sec / 3600
+        if lat_dir == 'S':
+            lat_decimal = -lat_decimal
+
+        # Parse longitude
+        lon_deg = int(lon_dms[0:3])
+        lon_min = int(lon_dms[3:5])
+        lon_sec = int(lon_dms[5:7])
+        lon_decimal = lon_deg + lon_min / 60 + lon_sec / 3600
+        if lon_dir == 'W':
+            lon_decimal = -lon_decimal
+
+        return lat_decimal, lon_decimal
+
+    return None, None
+
+
+def convert_notams_to_csv(notams: List[Dict]) -> pd.DataFrame:
+    """
+    Convert filtered NOTAM data to CSV format matching DOF/Part77 structure.
+
+    This follows the pattern from update_faa_data.py convert functions.
+
+    Args:
+        notams: List of filtered NOTAM dictionaries
+
+    Returns:
+        pandas DataFrame with CSV columns matching DOF/Part77 format
+    """
+    print(f"\nConverting {len(notams)} NOTAMs to CSV format...")
+
+    # Define expected CSV columns (matching DOF/Part77 format)
+    output_columns = [
+        'STUDY (ASN)', 'PRIOR ASN', 'STATUS', 'DETERMINATION', 'ENTERED DATE',
+        'RECEIVED DATE', 'COMPLETION DATE', 'EXPIRATION DATE', 'LATITUDE',
+        'LONGITUDE', 'HORIZONTAL DATUM', 'SURVEY_ACCURACY', 'MARKING LIGHTING TYPE',
+        'MARKING LIGHTING TYPE OTHER', 'STRUCTURE NAME', 'STRUCTURE CITY',
+        'STRUCTURE COUNTY NAME', 'STRUCTURE COUNTY ID', 'STRUCTURE STATE',
+        'NEAREST AIRPORT', 'DISTANCE FROM AIRPORT', 'DIRECTION FROM AIRPORT',
+        'ON AIRPORT', 'PROPOSAL DESCRIPTION', 'LOCATION DESCRIPTION', 'NOTICE OF',
+        'DURATION', 'DURATION DAYS', 'DURATION MONTHS', 'WORK SCHEDULE BEGINNING DATE',
+        'WORK SCHEDULE ENDING DATE', 'DATE BUILT', 'FCC NUMBER', 'STRUCTURE TYPE',
+        'STRUCTURE TYPE OTHER', 'AGL HEIGHT DET', 'AGL HEIGHT DNE',
+        'AGL HEIGHT PROPOSED', 'ELEVATION', 'AMSL HEIGHT DET', 'AMSL HEIGHT DNE',
+        'AMSL HEIGHT PROPOSED', 'REPRESENTATIVE NAME ', 'SPONSOR NAME ',
+        'SIGNATURE CONTROL NUMBER ', 'FREQUENCY_JSON ', 'DATA_SOURCE'
+    ]
+
+    rows = []
+
+    for notam in notams:
+        # Extract coordinates
+        notam_geom = notam.get('notamGeometry', '')
+        lat_decimal, lon_decimal = parse_notam_coordinates(notam_geom)
+
+        # Convert to DMS format
+        latitude_dms = decimal_to_dms_format(lat_decimal, is_longitude=False) if lat_decimal else ''
+        longitude_dms = decimal_to_dms_format(lon_decimal, is_longitude=True) if lon_decimal else ''
+
+        # Extract height from text
+        combined_text = notam.get('traditionalMessageFrom4thWord', '') + ' ' + notam.get('plainLanguageMessage', '')
+        height_agl = extract_height_from_text(combined_text)
+
+        # Parse dates
+        start_date_obj = parse_notam_date(notam.get('startDate', ''))
+        end_date_obj = parse_notam_date(notam.get('endDate', ''))
+
+        start_date_str = start_date_obj.strftime('%Y-%m-%d') if start_date_obj else ''
+        end_date_str = end_date_obj.strftime('%Y-%m-%d') if end_date_obj else ''
+
+        # Determine duration
+        end_date_raw = notam.get('endDate', '')
+        if 'PERM' in end_date_raw.upper():
+            duration = 'Permanent'
+        else:
+            duration = 'Temporary'
+
+        # Build row
+        row = {
+            'STUDY (ASN)': notam.get('notamNumber', 'N/A'),
+            'PRIOR ASN': '',
+            'STATUS': 'Active NOTAM' if notam.get('status') == 'Active' else notam.get('status', ''),
+            'DETERMINATION': 'Obstruction',
+            'ENTERED DATE': datetime.now().strftime('%Y-%m-%d'),
+            'RECEIVED DATE': '',
+            'COMPLETION DATE': '',
+            'EXPIRATION DATE': end_date_str,
+            'LATITUDE': latitude_dms,
+            'LONGITUDE': longitude_dms,
+            'HORIZONTAL DATUM': '',
+            'SURVEY_ACCURACY': '',
+            'MARKING LIGHTING TYPE': '',
+            'MARKING LIGHTING TYPE OTHER': '',
+            'STRUCTURE NAME': '',
+            'STRUCTURE CITY': '',
+            'STRUCTURE COUNTY NAME': '',
+            'STRUCTURE COUNTY ID': '',
+            'STRUCTURE STATE': '',
+            'NEAREST AIRPORT': f"{notam.get('facilityDesignator', '')} ({notam.get('airportName', '')})" if notam.get('airportName') else notam.get('facilityDesignator', ''),
+            'DISTANCE FROM AIRPORT': '',
+            'DIRECTION FROM AIRPORT': '',
+            'ON AIRPORT': '',
+            'PROPOSAL DESCRIPTION': '',
+            'LOCATION DESCRIPTION': notam.get('traditionalMessageFrom4thWord', '')[:100],
+            'NOTICE OF': 'Temporary Obstruction',
+            'DURATION': duration,
+            'DURATION DAYS': '',
+            'DURATION MONTHS': '',
+            'WORK SCHEDULE BEGINNING DATE': start_date_str,
+            'WORK SCHEDULE ENDING DATE': end_date_str,
+            'DATE BUILT': '',
+            'FCC NUMBER': '',
+            'STRUCTURE TYPE': 'CRANE',
+            'STRUCTURE TYPE OTHER': '',
+            'AGL HEIGHT DET': height_agl if height_agl else '',
+            'AGL HEIGHT DNE': '',
+            'AGL HEIGHT PROPOSED': '',
+            'ELEVATION': '',
+            'AMSL HEIGHT DET': '',
+            'AMSL HEIGHT DNE': '',
+            'AMSL HEIGHT PROPOSED': '',
+            'REPRESENTATIVE NAME ': '',
+            'SPONSOR NAME ': '',
+            'SIGNATURE CONTROL NUMBER ': '',
+            'FREQUENCY_JSON ': '',
+            'DATA_SOURCE': 'NOTAM'
+        }
+
+        rows.append(row)
+
+    # Create DataFrame
+    df = pd.DataFrame(rows, columns=output_columns)
+
+    # Filter out rows with missing critical data
+    df = df.dropna(subset=['LATITUDE', 'LONGITUDE'])
+    df = df[df['LATITUDE'] != '']
+    df = df[df['LONGITUDE'] != '']
+
+    print(f"✓ Converted {len(df)} NOTAMs to CSV format")
+    if len(df) < len(notams):
+        print(f"  ⚠ Dropped {len(notams) - len(df)} NOTAMs due to missing coordinates")
+
+    return df
+
+
 def fetch_all_notams(grid_points: List[Tuple[float, float]], radius: int = 100) -> List[Dict]:
     """
     Fetch NOTAMs for all grid points with rate limiting.
@@ -466,37 +708,37 @@ def fetch_all_notams(grid_points: List[Tuple[float, float]], radius: int = 100) 
     return all_notams
 
 
-def save_results(notams: List[Dict], output_file: str):
+def save_csv(df: pd.DataFrame, output_file: str):
     """
-    Save NOTAM results to JSON file.
+    Save NOTAM DataFrame to CSV file matching DOF/Part77 format.
 
     Args:
-        notams: List of NOTAM dictionaries
-        output_file: Output file path
+        df: pandas DataFrame with NOTAM data
+        output_file: Output CSV file path
     """
-    from datetime import timezone
+    import os
 
-    result = {
-        'metadata': {
-            'fetch_date': datetime.now(timezone.utc).isoformat(),
-            'total_notams': len(notams),
-            'source': 'FAA NOTAM Search API',
-            'endpoint': NOTAM_API_ENDPOINT
-        },
-        'notams': notams
-    }
+    # Create directory if needed
+    os.makedirs(os.path.dirname(output_file), exist_ok=True)
 
-    with open(output_file, 'w') as f:
-        json.dump(result, f, indent=2)
+    # Save with robust CSV formatting (matching update_faa_data.py pattern)
+    df.to_csv(
+        output_file,
+        index=False,
+        quoting=1,  # QUOTE_ALL - quotes all fields
+        escapechar='\\',  # Escape special characters
+        doublequote=True,  # Handle double quotes properly
+        lineterminator='\n'  # Use consistent line endings
+    )
 
-    print(f"\n✓ Saved {len(notams)} NOTAMs to {output_file}")
+    print(f"\n✓ Saved {len(df)} NOTAMs to {output_file}")
 
 
 def main():
     """Main execution function."""
     parser = argparse.ArgumentParser(description='Fetch NOTAM data for continental US')
     parser.add_argument('--test', action='store_true', help='Run with small test grid')
-    parser.add_argument('--output', default='public/data/notams-raw.json', help='Output file path')
+    parser.add_argument('--output', default='public/data/notams.csv', help='Output CSV file path')
     parser.add_argument('--radius', type=int, default=100, help='Search radius in NM')
     parser.add_argument('--spacing', type=int, default=100, help='Grid spacing in NM')
 
@@ -531,16 +773,19 @@ def main():
     # Filter for crane-related obstructions (pvk.4)
     filtered_notams = filter_crane_notams(unique_notams)
 
-    # Save results
-    save_results(filtered_notams, args.output)
+    # Convert to CSV format (pvk.5)
+    notams_df = convert_notams_to_csv(filtered_notams)
+
+    # Save CSV file
+    save_csv(notams_df, args.output)
 
     print("\n" + "="*70)
     print("FETCH COMPLETE")
     print("="*70)
     print(f"\nNext steps:")
     print(f"1. Review {args.output}")
-    print(f"2. Filter for crane-related NOTAMs (pvk.4)")
-    print(f"3. Convert to CSV format (pvk.5)")
+    print(f"2. Integrate into update_faa_data.py (pvk.6)")
+    print(f"3. Add frontend loading (pvk.7)")
     print()
 
 
