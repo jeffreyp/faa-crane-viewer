@@ -33,8 +33,30 @@ jobs:
         pip install requests pandas
         
     - name: Download and process FAA data
+      id: download-data
       run: python scripts/update_faa_data.py
-      
+
+    - name: Report failure
+      if: failure() && steps.download-data.outcome == 'failure'
+      run: |
+        echo "## :x: FAA Data Update Failed" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "The FAA data download and processing step failed." >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "**Timestamp:** $(date -u '+%Y-%m-%d %H:%M:%S UTC')" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "### Possible causes:" >> $GITHUB_STEP_SUMMARY
+        echo "- FAA API endpoints may be down or changed" >> $GITHUB_STEP_SUMMARY
+        echo "- Network connectivity issues" >> $GITHUB_STEP_SUMMARY
+        echo "- Data format changes from FAA" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "### Next steps:" >> $GITHUB_STEP_SUMMARY
+        echo "1. Check the workflow logs above for specific error messages" >> $GITHUB_STEP_SUMMARY
+        echo "2. Verify FAA data sources are accessible:" >> $GITHUB_STEP_SUMMARY
+        echo "   - DOF: https://aeronav.faa.gov/Obst_Data/DAILY_DOF_CSV.ZIP" >> $GITHUB_STEP_SUMMARY
+        echo "   - OEAAA: https://oeaaa.faa.gov/oeaaa/oe3a/main/#/download" >> $GITHUB_STEP_SUMMARY
+        echo "3. Review and update scripts/update_faa_data.py if needed" >> $GITHUB_STEP_SUMMARY
+
     - name: Check for changes
       id: git-check
       run: |

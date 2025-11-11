@@ -1,5 +1,7 @@
 # FAA Construction Crane Viewer
 
+![Update FAA Data](https://github.com/jeffreyp/faa-crane-viewer/actions/workflows/update-faa-data.yml/badge.svg)
+
 An entirely vibe-coded web application that displays construction cranes within a user-specified nautical mile radius of a US address/location.
 
 See [demo page](https://jeffreyp.github.io/faa-crane-viewer). 
@@ -54,6 +56,31 @@ This application is configured for deployment to GitHub Pages:
    ```
 
 3. The application will be available at the URL specified in your homepage field
+
+## Automated Data Updates
+
+The FAA obstacle data is automatically updated daily at 6 AM UTC via GitHub Actions. The workflow:
+
+- Downloads the latest DOF (Digital Obstacle File) data from FAA
+- Downloads Part 77 regional data from all 9 FAA regions
+- Processes and merges crane-related structures
+- Commits updated data and redeploys to GitHub Pages
+
+### Monitoring Updates
+
+The status badge at the top of this README shows whether the automated updates are working:
+- ✅ Green badge = updates are running successfully
+- ❌ Red badge = last update failed
+
+### Failure Notifications
+
+If data updates fail, you'll be notified via:
+
+1. **GitHub email notifications** - Make sure you have "Actions" notifications enabled in your [GitHub notification settings](https://github.com/settings/notifications)
+2. **Workflow summary** - Each failed run includes a detailed summary with troubleshooting steps
+3. **Status badge** - The badge will turn red when updates fail
+
+To manually trigger an update, go to the [Actions tab](https://github.com/jeffreyp/faa-crane-viewer/actions/workflows/update-faa-data.yml) and click "Run workflow".
 
 ## Implementation Details
 
