@@ -278,6 +278,139 @@ def deduplicate_notams(all_notams: List[Dict]) -> List[Dict]:
     return unique_notams
 
 
+def parse_notam_date(date_str: str) -> datetime:
+    """
+    Parse NOTAM date string to datetime object.
+
+    NOTAM dates come in formats like:
+    - "05/14/2025 1443" (MM/DD/YYYY HHmm)
+    - "PERM" (permanent - treat as far future)
+    - "EST" (estimated - treat as far future)
+
+    Args:
+        date_str: Date string from NOTAM
+
+    Returns:
+        datetime object, or None if unparseable
+    """
+    if not date_str or date_str.strip() == '':
+        return None
+
+    date_str = date_str.strip()
+
+    # Handle special cases
+    if date_str.upper() in ['PERM', 'PERMANENT']:
+        # Permanent - use far future date (2099)
+        return datetime(2099, 12, 31, 23, 59)
+
+    if date_str.upper() in ['EST', 'ESTIMATED']:
+        # Estimated - use far future date
+        return datetime(2099, 12, 31, 23, 59)
+
+    # Parse standard format: "05/14/2025 1443"
+    try:
+        # Split date and time
+        parts = date_str.split()
+        if len(parts) >= 2:
+            date_part = parts[0]  # "05/14/2025"
+            time_part = parts[1]  # "1443"
+
+            # Parse date
+            month, day, year = date_part.split('/')
+
+            # Parse time (HHmm format)
+            if len(time_part) == 4:
+                hour = int(time_part[:2])
+                minute = int(time_part[2:])
+            else:
+                hour = 0
+                minute = 0
+
+            return datetime(int(year), int(month), int(day), hour, minute)
+        elif len(parts) == 1:
+            # Just date, no time
+            date_part = parts[0]
+            month, day, year = date_part.split('/')
+            return datetime(int(year), int(month), int(day), 0, 0)
+    except (ValueError, IndexError) as e:
+        print(f"  ⚠ Could not parse date '{date_str}': {e}")
+        return None
+
+    return None
+
+
+def filter_crane_notams(notams: List[Dict]) -> List[Dict]:
+    """
+    Filter NOTAMs for crane-related obstructions with active date ranges.
+
+    Filtering criteria (matching pvk.4 requirements):
+    1. featureName == "Obstruction" OR keyword == "OBST"
+    2. Text contains "CRANE" (case-insensitive)
+    3. Current date is within start/end date range
+
+    Args:
+        notams: List of all NOTAM dictionaries
+
+    Returns:
+        Filtered list of crane-related obstruction NOTAMs
+    """
+    filtered = []
+    current_time = datetime.now()
+
+    print(f"\nFiltering NOTAMs for crane-related obstructions...")
+    print(f"Current time: {current_time.strftime('%Y-%m-%d %H:%M')}")
+
+    for notam in notams:
+        # Filter 1: Check if it's an obstruction
+        feature_name = notam.get('featureName', '')
+        keyword = notam.get('keyword', '')
+
+        is_obstruction = (feature_name == 'Obstruction' or keyword == 'OBST')
+
+        if not is_obstruction:
+            continue
+
+        # Filter 2: Check if text contains "CRANE"
+        traditional_msg = notam.get('traditionalMessageFrom4thWord', '')
+        plain_msg = notam.get('plainLanguageMessage', '')
+        combined_text = f"{traditional_msg} {plain_msg}".upper()
+
+        has_crane = 'CRANE' in combined_text
+
+        if not has_crane:
+            continue
+
+        # Filter 3: Check if NOTAM is currently active
+        start_date_str = notam.get('startDate', '')
+        end_date_str = notam.get('endDate', '')
+
+        start_date = parse_notam_date(start_date_str)
+        end_date = parse_notam_date(end_date_str)
+
+        # If we can't parse dates, include it (be permissive)
+        if start_date is None and end_date is None:
+            print(f"  ⚠ Including NOTAM {notam.get('notamNumber', 'N/A')} - could not parse dates")
+            filtered.append(notam)
+            continue
+
+        # Check if current time is within range
+        is_active = True
+
+        if start_date and current_time < start_date:
+            is_active = False  # Not yet active
+
+        if end_date and current_time > end_date:
+            is_active = False  # Expired
+
+        if is_active:
+            filtered.append(notam)
+
+    print(f"✓ Filtered to {len(filtered)} crane-related obstruction NOTAMs")
+    print(f"  Removed: {len(notams) - len(filtered)} non-crane or inactive NOTAMs")
+
+    return filtered
+
+
 def fetch_all_notams(grid_points: List[Tuple[float, float]], radius: int = 100) -> List[Dict]:
     """
     Fetch NOTAMs for all grid points with rate limiting.
@@ -395,8 +528,11 @@ def main():
     print(f"Unique NOTAMs: {len(unique_notams)}")
     print(f"Duplicates removed: {len(all_notams) - len(unique_notams)}")
 
+    # Filter for crane-related obstructions (pvk.4)
+    filtered_notams = filter_crane_notams(unique_notams)
+
     # Save results
-    save_results(unique_notams, args.output)
+    save_results(filtered_notams, args.output)
 
     print("\n" + "="*70)
     print("FETCH COMPLETE")
