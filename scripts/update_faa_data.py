@@ -40,7 +40,7 @@ def download_faa_dof():
 
 def download_part77_region(region_code):
     """Download Part 77 data for a specific region."""
-    url = f"https://oeaaa.faa.gov/oeaaa/oe3a-external-api/downloadArchives.do?fname=OffAirport{region_code}2025List.gzip"
+    url = f"https://oeaaa.faa.gov/oeaaa/oe3a-external-api/downloadArchives.do?fname=Part77{region_code}2025List.gzip"
     
     print(f"Downloading Part 77 data for {region_code} region from {url}...")
     try:
@@ -94,40 +94,54 @@ def extract_csv_from_zip(zip_content):
     """Extract CSV data from the ZIP file."""
     with zipfile.ZipFile(io.BytesIO(zip_content)) as z:
         print(f"Files in ZIP archive: {z.namelist()}")
-        
+
         # Look for different file types the FAA might use
         csv_files = [f for f in z.namelist() if f.lower().endswith('.csv')]
         txt_files = [f for f in z.namelist() if f.lower().endswith('.txt')]
         dat_files = [f for f in z.namelist() if f.lower().endswith('.dat')]
-        
+
+        # Helper function to try reading with different encodings
+        def read_with_encoding(file_obj):
+            # Try different encodings in order
+            encodings = ['utf-8', 'latin-1', 'cp1252', 'iso-8859-1']
+            for encoding in encodings:
+                try:
+                    file_obj.seek(0)  # Reset file position
+                    return pd.read_csv(file_obj, low_memory=False, encoding=encoding)
+                except (UnicodeDecodeError, UnicodeError):
+                    continue
+            # If all encodings fail, try with error handling
+            file_obj.seek(0)
+            return pd.read_csv(file_obj, low_memory=False, encoding='utf-8', encoding_errors='replace')
+
         # Try CSV files first
         if csv_files:
             csv_file = csv_files[0]
             print(f"Extracting CSV file: {csv_file}...")
             with z.open(csv_file) as f:
-                return pd.read_csv(f, low_memory=False)
-        
+                return read_with_encoding(f)
+
         # Try TXT files (often CSV format)
         elif txt_files:
             txt_file = txt_files[0]
             print(f"Extracting TXT file as CSV: {txt_file}...")
             with z.open(txt_file) as f:
-                return pd.read_csv(f, low_memory=False)
-        
+                return read_with_encoding(f)
+
         # Try DAT files (also often CSV format)
         elif dat_files:
             dat_file = dat_files[0]
             print(f"Extracting DAT file as CSV: {dat_file}...")
             with z.open(dat_file) as f:
-                return pd.read_csv(f, low_memory=False)
-        
+                return read_with_encoding(f)
+
         # If no recognizable files, try the first file
         elif z.namelist():
             first_file = z.namelist()[0]
             print(f"No CSV/TXT/DAT found, trying first file: {first_file}...")
             with z.open(first_file) as f:
-                return pd.read_csv(f, low_memory=False)
-        
+                return read_with_encoding(f)
+
         else:
             raise ValueError("No files found in the ZIP archive")
 
@@ -414,7 +428,7 @@ def main():
                         # Save the fresh regional data for reference
                         local_data_path = "public/data/regions"
                         os.makedirs(local_data_path, exist_ok=True)
-                        local_file = f"{local_data_path}/OffAirport{region}2025List.csv"
+                        local_file = f"{local_data_path}/Part77{region}2025List.csv"
                         part77_df.to_csv(local_file, index=False, quoting=1, escapechar='\\', doublequote=True)
                         print(f"Saved fresh {region} data to {local_file}")
 
