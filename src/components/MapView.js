@@ -176,15 +176,52 @@ const MapView = ({ location, radius, cranes, selectedCraneId, onCraneSelect }) =
         },
         onEachFeature: (feature, layer) => {
           const props = feature.properties;
-          layer.bindPopup(`
-            <strong>${props.structureType}</strong><br/>
-            ID: ${props.id}<br/>
-            Height: ${props.height} ${props.heightUnit}<br/>
-            Status: ${props.status}<br/>
-            Dates: ${props.startDate} - ${props.endDate}<br/>
-            Sponsor: ${props.sponsor}<br/>
-            <small>Source: ${props.dataSource || 'Unknown'}</small>
-          `);
+
+          // Create different popup content based on data source
+          const isNOTAM = props.dataSource === 'NOTAM';
+
+          const sourceBadgeStyle = isNOTAM
+            ? 'background-color: #FF8C00; color: white; padding: 2px 6px; border-radius: 3px; font-size: 0.75rem; font-weight: bold;'
+            : props.dataSource === 'DOF'
+            ? 'background-color: #4A90E2; color: white; padding: 2px 6px; border-radius: 3px; font-size: 0.75rem; font-weight: bold;'
+            : 'background-color: #50C878; color: white; padding: 2px 6px; border-radius: 3px; font-size: 0.75rem; font-weight: bold;';
+
+          let popupContent = `
+            <div style="min-width: 200px;">
+              <div style="margin-bottom: 8px;">
+                <strong style="font-size: 1.1rem;">${props.structureType}</strong>
+                <span style="${sourceBadgeStyle}; margin-left: 8px;">${props.dataSource || 'Unknown'}</span>
+              </div>
+          `;
+
+          if (isNOTAM) {
+            // NOTAM-specific popup with emphasis on temporary nature
+            popupContent += `
+              <div style="background-color: #FFF3E0; padding: 8px; border-radius: 4px; margin-bottom: 8px;">
+                <strong style="color: #FF8C00;">⚠️ Temporary Obstruction</strong>
+              </div>
+              <strong>NOTAM ID:</strong> ${props.id}<br/>
+              <strong>Height:</strong> ${props.height} ${props.heightUnit}<br/>
+              <strong>Status:</strong> ${props.status}<br/>
+              <div style="background-color: #E3F2FD; padding: 6px; border-radius: 4px; margin-top: 6px;">
+                <strong>Active Period:</strong><br/>
+                ${props.startDate || 'N/A'} to ${props.endDate || 'N/A'}
+              </div>
+            `;
+          } else {
+            // DOF/Part77 popup - standard format
+            popupContent += `
+              <strong>ID:</strong> ${props.id}<br/>
+              <strong>Height:</strong> ${props.height} ${props.heightUnit}<br/>
+              <strong>Status:</strong> ${props.status}<br/>
+              <strong>Dates:</strong> ${props.startDate} - ${props.endDate}<br/>
+              <strong>Sponsor:</strong> ${props.sponsor}
+            `;
+          }
+
+          popupContent += `</div>`;
+
+          layer.bindPopup(popupContent);
 
           // Store reference to the layer for highlighting
           layer.craneId = props.uniqueId;
