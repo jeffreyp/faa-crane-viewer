@@ -62,24 +62,63 @@ const Button = styled.button`
   font-size: 1rem;
   cursor: pointer;
   white-space: nowrap;
-  
+
   &:hover {
     background-color: #45a049;
   }
-  
+
   &:disabled {
     background-color: #cccccc;
     cursor: not-allowed;
   }
 `;
 
-const SearchBar = ({ defaultAddress, defaultRadius, onSearch, loading }) => {
+const FilterContainer = styled.div`
+  display: flex;
+  align-items: center;
+  gap: 1.5rem;
+  margin-top: 0.75rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid rgba(255, 255, 255, 0.2);
+
+  @media (max-width: 768px) {
+    flex-wrap: wrap;
+  }
+`;
+
+const FilterLabel = styled.label`
+  display: flex;
+  align-items: center;
+  color: white;
+  font-size: 0.9rem;
+  cursor: pointer;
+  user-select: none;
+
+  input {
+    margin-right: 0.4rem;
+    cursor: pointer;
+  }
+`;
+
+const FilterTitle = styled.span`
+  color: rgba(255, 255, 255, 0.8);
+  font-size: 0.9rem;
+  margin-right: 0.5rem;
+`;
+
+const SearchBar = ({ defaultAddress, defaultRadius, onSearch, loading, dataSourceFilters, onFilterChange }) => {
   const [address, setAddress] = useState(defaultAddress);
   const [radius, setRadius] = useState(defaultRadius);
-  
+
   const handleSubmit = (e) => {
     e.preventDefault();
     onSearch(address, Number(radius));
+  };
+
+  const handleFilterToggle = (source) => {
+    if (onFilterChange) {
+      onFilterChange(source);
+    }
   };
   
   return (
@@ -107,6 +146,35 @@ const SearchBar = ({ defaultAddress, defaultRadius, onSearch, loading }) => {
           {loading ? 'Searching...' : 'Search'}
         </Button>
       </SearchContainer>
+      {dataSourceFilters && (
+        <FilterContainer>
+          <FilterTitle>Data Sources:</FilterTitle>
+          <FilterLabel>
+            <input
+              type="checkbox"
+              checked={dataSourceFilters.dof}
+              onChange={() => handleFilterToggle('dof')}
+            />
+            DOF
+          </FilterLabel>
+          <FilterLabel>
+            <input
+              type="checkbox"
+              checked={dataSourceFilters.part77}
+              onChange={() => handleFilterToggle('part77')}
+            />
+            Part 77
+          </FilterLabel>
+          <FilterLabel>
+            <input
+              type="checkbox"
+              checked={dataSourceFilters.notam}
+              onChange={() => handleFilterToggle('notam')}
+            />
+            NOTAM
+          </FilterLabel>
+        </FilterContainer>
+      )}
     </form>
   );
 };

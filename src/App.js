@@ -48,6 +48,11 @@ const App = () => {
     address: "10601 W Van Buren St, Tolleson, AZ 85353"
   });
   const [radius, setRadius] = useState(10); // 10 nautical miles
+  const [dataSourceFilters, setDataSourceFilters] = useState({
+    dof: true,
+    part77: true,
+    notam: true
+  });
 
   useEffect(() => {
     searchCranes(location, radius);
@@ -79,31 +84,31 @@ const App = () => {
     console.log('Search initiated:', { address, radius });
     setLoading(true);
     setError(null);
-    
+
     try {
       // Geocode the address
       console.log('Geocoding address:', address);
       const geocodeResult = await geocodeAddress(address);
       console.log('Geocode result:', geocodeResult);
-      
+
       // Validate the result is within the continental US
       if (!isWithinContinentalUS(geocodeResult.latitude, geocodeResult.longitude)) {
         throw new Error('Address must be within the continental United States.');
       }
-      
+
       // Update location with geocoded coordinates
       const newLocation = {
         lat: geocodeResult.latitude,
         lng: geocodeResult.longitude,
         address: formatDisplayAddress(geocodeResult)
       };
-      
+
       setLocation(newLocation);
       setRadius(radius);
-      
+
       // Search for cranes at the new location
       await searchCranes(newLocation, radius);
-      
+
     } catch (err) {
       setError(`Geocoding failed: ${err.message}`);
       console.error('Geocoding error:', err);
@@ -111,27 +116,59 @@ const App = () => {
     }
   };
 
+  const handleFilterToggle = (source) => {
+    setDataSourceFilters(prev => ({
+      ...prev,
+      [source]: !prev[source]
+    }));
+  };
+
+  // Filter cranes based on data source selections
+  const filteredCranes = cranes.filter(crane => {
+    const dataSource = crane.dataSource || '';
+
+    // Check if it's a NOTAM
+    if (dataSource === 'NOTAM') {
+      return dataSourceFilters.notam;
+    }
+
+    // Check if it's Part77 (includes region codes like Part77-ASO, Part77-AGL, etc.)
+    if (dataSource.startsWith('Part77')) {
+      return dataSourceFilters.part77;
+    }
+
+    // Check if it's DOF
+    if (dataSource === 'DOF') {
+      return dataSourceFilters.dof;
+    }
+
+    // Default: show if no data source specified (backward compatibility)
+    return true;
+  });
+
   return (
     <AppContainer>
       <Header>
         <Title>FAA Construction Crane Viewer</Title>
-        <SearchBar 
+        <SearchBar
           defaultAddress="10601 W Van Buren St, Tolleson, AZ 85353"
-          defaultRadius={radius} 
-          onSearch={handleSearch} 
+          defaultRadius={radius}
+          onSearch={handleSearch}
           loading={loading}
+          dataSourceFilters={dataSourceFilters}
+          onFilterChange={handleFilterToggle}
         />
       </Header>
-      {error && <div style={{ 
-        color: error.startsWith('Warning:') ? 'orange' : 'red', 
+      {error && <div style={{
+        color: error.startsWith('Warning:') ? 'orange' : 'red',
         backgroundColor: error.startsWith('Warning:') ? '#FFF8E1' : '#FFEBEE',
         padding: '0.5rem',
         margin: '0',
         borderBottom: '1px solid #DDD'
       }}>{error}</div>}
       <ViewsContainer>
-        <MapView location={location} radius={radius} cranes={cranes} selectedCraneId={selectedCraneId} onCraneSelect={setSelectedCraneId} />
-        <TableView cranes={cranes} loading={loading} selectedCraneId={selectedCraneId} onCraneSelect={setSelectedCraneId} />
+        <MapView location={location} radius={radius} cranes={filteredCranes} selectedCraneId={selectedCraneId} onCraneSelect={setSelectedCraneId} />
+        <TableView cranes={filteredCranes} loading={loading} selectedCraneId={selectedCraneId} onCraneSelect={setSelectedCraneId} />
       </ViewsContainer>
     </AppContainer>
   );
