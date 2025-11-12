@@ -4,6 +4,7 @@ import Papa from 'papaparse';
 // Constants - using direct absolute path for webpack dev server
 const DOF_CSV_PATH = 'data/datafile.csv';
 const PART77_CSV_PATH = 'data/part77-data.csv';
+const NOTAM_CSV_PATH = 'data/notams.csv';
 
 // Convert DMS (Degrees-Minutes-Seconds) to decimal degrees or return decimal if already in decimal format
 const coordinateToDecimal = (coordStr) => {
@@ -129,19 +130,20 @@ const parseCSVData = async (csvData) => {
   });
 };
 
-// Fetch crane data from both DOF and Part77 CSV files
+// Fetch crane data from DOF, Part77, and NOTAM CSV files
 export const fetchCraneData = async (location, radiusNM) => {
   try {
-    console.log('Fetching crane data from both DOF and Part77 sources...');
-    
-    // Fetch both CSV files in parallel
-    const [dofResponse, part77Response] = await Promise.all([
+    console.log('Fetching crane data from DOF, Part77, and NOTAM sources...');
+
+    // Fetch all three CSV files in parallel
+    const [dofResponse, part77Response, notamResponse] = await Promise.all([
       fetch(DOF_CSV_PATH),
-      fetch(PART77_CSV_PATH)
+      fetch(PART77_CSV_PATH),
+      fetch(NOTAM_CSV_PATH)
     ]);
-    
-    if (!dofResponse.ok && !part77Response.ok) {
-      throw new Error(`Failed to fetch both CSV files: DOF ${dofResponse.status}, Part77 ${part77Response.status}`);
+
+    if (!dofResponse.ok && !part77Response.ok && !notamResponse.ok) {
+      throw new Error(`Failed to fetch all CSV files: DOF ${dofResponse.status}, Part77 ${part77Response.status}, NOTAM ${notamResponse.status}`);
     }
     
     let allCraneData = [];
@@ -167,7 +169,18 @@ export const fetchCraneData = async (location, radiusNM) => {
     } else {
       console.warn('Failed to fetch Part77 data:', part77Response.status);
     }
-    
+
+    // Process NOTAM data if available
+    if (notamResponse.ok) {
+      console.log('Processing NOTAM data...');
+      const notamText = await notamResponse.text();
+      const notamCranes = await parseCSVData(notamText);
+      allCraneData.push(...notamCranes);
+      console.log(`Loaded ${notamCranes.length} NOTAM cranes`);
+    } else {
+      console.warn('Failed to fetch NOTAM data:', notamResponse.status);
+    }
+
     console.log(`Total cranes loaded: ${allCraneData.length}`);
 
     // Remove duplicates based on uniqueId
