@@ -53,6 +53,34 @@ const TableCell = styled.td`
   border-bottom: 1px solid #ddd;
 `;
 
+const SourceBadge = styled.span`
+  display: inline-block;
+  padding: 0.25rem 0.5rem;
+  border-radius: 4px;
+  font-size: 0.75rem;
+  font-weight: bold;
+
+  ${props => {
+    switch(props.source) {
+      case 'NOTAM':
+        return `
+          background-color: #FF8C00;
+          color: white;
+        `;
+      case 'DOF':
+        return `
+          background-color: #4A90E2;
+          color: white;
+        `;
+      default: // Part77-* sources
+        return `
+          background-color: #50C878;
+          color: white;
+        `;
+    }
+  }}
+`;
+
 const EmptyState = styled.div`
   display: flex;
   justify-content: center;
@@ -122,6 +150,7 @@ const TableView = ({ cranes, loading, selectedCraneId, onCraneSelect }) => {
     { field: 'structureType', label: 'Type' },
     { field: 'height', label: 'Height (AGL)' },
     { field: 'status', label: 'Status' },
+    { field: 'dataSource', label: 'Source' },
     { field: 'startDate', label: 'Start Date' },
     { field: 'endDate', label: 'End Date' },
     { field: 'sponsor', label: 'Sponsor' }
@@ -165,6 +194,8 @@ const TableView = ({ cranes, loading, selectedCraneId, onCraneSelect }) => {
                 <TableCell key={`${crane.uniqueId}-${column.field}`}>
                   {column.field === 'height'
                     ? `${crane[column.field]} ft`
+                    : column.field === 'dataSource'
+                    ? <SourceBadge source={crane.dataSource}>{crane.dataSource}</SourceBadge>
                     : crane[column.field]}
                 </TableCell>
               ))}

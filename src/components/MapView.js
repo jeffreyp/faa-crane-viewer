@@ -3,9 +3,25 @@ import styled from 'styled-components';
 import L from 'leaflet';
 import { cranesToGeoJson, RADIUS_NM_TO_METERS } from '../services/faaService';
 
-// Create custom crane icon
+// Create custom crane icon (for DOF and Part77 data)
 const craneIcon = L.icon({
   iconUrl: 'https://cdn-icons-png.flaticon.com/512/149/149059.png',
+  iconSize: [30, 30],
+  iconAnchor: [15, 30],
+  popupAnchor: [0, -30]
+});
+
+// Create NOTAM icon (orange warning icon for temporary obstructions)
+const notamIcon = L.divIcon({
+  className: 'notam-marker',
+  html: `
+    <div class="notam-marker-inner">
+      <svg width="30" height="30" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <path d="M12 2L2 20h20L12 2z" fill="#FF8C00" stroke="#FF6600" stroke-width="2"/>
+        <path d="M12 9v4M12 17h.01" stroke="white" stroke-width="2" stroke-linecap="round"/>
+      </svg>
+    </div>
+  `,
   iconSize: [30, 30],
   iconAnchor: [15, 30],
   popupAnchor: [0, -30]
@@ -23,10 +39,37 @@ const MapContainer = styled.div`
   flex: 1;
   min-height: 400px;
   border-right: 1px solid #ccc;
-  
+
   @media (max-width: 768px) {
     border-right: none;
     border-bottom: 1px solid #ccc;
+  }
+
+  /* NOTAM marker pulse animation */
+  .notam-marker {
+    background: transparent;
+    border: none;
+  }
+
+  .notam-marker-inner {
+    position: relative;
+    animation: notam-pulse 2s ease-in-out infinite;
+  }
+
+  @keyframes notam-pulse {
+    0%, 100% {
+      transform: scale(1);
+      opacity: 1;
+    }
+    50% {
+      transform: scale(1.15);
+      opacity: 0.85;
+    }
+  }
+
+  /* Add a subtle glow effect to NOTAM markers */
+  .notam-marker-inner svg {
+    filter: drop-shadow(0 0 3px rgba(255, 140, 0, 0.6));
   }
 `;
 
@@ -126,19 +169,59 @@ const MapView = ({ location, radius, cranes, selectedCraneId, onCraneSelect }) =
       // Add new GeoJSON layer
       geojsonLayerRef.current = L.geoJSON(geojson, {
         pointToLayer: (feature, latlng) => {
-          return L.marker(latlng, { icon: craneIcon });
+          // Use different icons based on data source
+          const dataSource = feature.properties.dataSource;
+          const icon = dataSource === 'NOTAM' ? notamIcon : craneIcon;
+          return L.marker(latlng, { icon: icon });
         },
         onEachFeature: (feature, layer) => {
           const props = feature.properties;
-          layer.bindPopup(`
-            <strong>${props.structureType}</strong><br/>
-            ID: ${props.id}<br/>
-            Height: ${props.height} ${props.heightUnit}<br/>
-            Status: ${props.status}<br/>
-            Dates: ${props.startDate} - ${props.endDate}<br/>
-            Sponsor: ${props.sponsor}<br/>
-            <small>Source: ${props.dataSource || 'Unknown'}</small>
-          `);
+
+          // Create different popup content based on data source
+          const isNOTAM = props.dataSource === 'NOTAM';
+
+          const sourceBadgeStyle = isNOTAM
+            ? 'background-color: #FF8C00; color: white; padding: 2px 6px; border-radius: 3px; font-size: 0.75rem; font-weight: bold;'
+            : props.dataSource === 'DOF'
+            ? 'background-color: #4A90E2; color: white; padding: 2px 6px; border-radius: 3px; font-size: 0.75rem; font-weight: bold;'
+            : 'background-color: #50C878; color: white; padding: 2px 6px; border-radius: 3px; font-size: 0.75rem; font-weight: bold;';
+
+          let popupContent = `
+            <div style="min-width: 200px;">
+              <div style="margin-bottom: 8px;">
+                <strong style="font-size: 1.1rem;">${props.structureType}</strong>
+                <span style="${sourceBadgeStyle}; margin-left: 8px;">${props.dataSource || 'Unknown'}</span>
+              </div>
+          `;
+
+          if (isNOTAM) {
+            // NOTAM-specific popup with emphasis on temporary nature
+            popupContent += `
+              <div style="background-color: #FFF3E0; padding: 8px; border-radius: 4px; margin-bottom: 8px;">
+                <strong style="color: #FF8C00;">⚠️ Temporary Obstruction</strong>
+              </div>
+              <strong>NOTAM ID:</strong> ${props.id}<br/>
+              <strong>Height:</strong> ${props.height} ${props.heightUnit}<br/>
+              <strong>Status:</strong> ${props.status}<br/>
+              <div style="background-color: #E3F2FD; padding: 6px; border-radius: 4px; margin-top: 6px;">
+                <strong>Active Period:</strong><br/>
+                ${props.startDate || 'N/A'} to ${props.endDate || 'N/A'}
+              </div>
+            `;
+          } else {
+            // DOF/Part77 popup - standard format
+            popupContent += `
+              <strong>ID:</strong> ${props.id}<br/>
+              <strong>Height:</strong> ${props.height} ${props.heightUnit}<br/>
+              <strong>Status:</strong> ${props.status}<br/>
+              <strong>Dates:</strong> ${props.startDate} - ${props.endDate}<br/>
+              <strong>Sponsor:</strong> ${props.sponsor}
+            `;
+          }
+
+          popupContent += `</div>`;
+
+          layer.bindPopup(popupContent);
 
           // Store reference to the layer for highlighting
           layer.craneId = props.uniqueId;

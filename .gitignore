@@ -1,5 +1,7 @@
 ./claude/
 /node_modules/
+__pycache__/
+*.pyc
 
 .DS_Store
 .vscode

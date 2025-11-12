@@ -11,9 +11,14 @@ import gzip
 import pandas as pd
 import io
 import os
+import re
+import json
+import time
 from datetime import datetime
 import tempfile
 from pathlib import Path
+from urllib.parse import urlencode
+from typing import Dict, List, Tuple, Optional
 
 # FAA Region codes for Part 77 data
 FAA_REGIONS = [
@@ -27,6 +32,21 @@ FAA_REGIONS = [
     'ASW',  # Southwest
     'AWP'   # Western Pacific
 ]
+
+# NOTAM API configuration
+NOTAM_API_ENDPOINT = "https://notams.aim.faa.gov/notamSearch/search"
+NOTAM_REQUEST_DELAY = 2.0  # Seconds between requests
+NOTAM_REQUEST_TIMEOUT = 30  # Seconds
+NOTAM_MAX_RETRIES = 3
+NOTAM_RETRY_DELAY = 5  # Seconds
+
+# Continental US boundaries for NOTAM grid
+CONUS_BOUNDS = {
+    'min_lat': 24.5,   # Southern Florida
+    'max_lat': 49.0,   # Northern border
+    'min_lon': -125.0, # West coast
+    'max_lon': -66.9   # East coast
+}
 
 def download_faa_dof():
     """Download the latest FAA Digital Obstacle File (DOF) CSV."""
@@ -395,6 +415,429 @@ def merge_dataframes(dof_df, part77_dfs):
     print(f"Final merged dataset: {len(merged_df)} total records")
     return merged_df
 
+def nm_to_degrees(nm: float, latitude: float = 37.0) -> float:
+    """Convert nautical miles to approximate degrees."""
+    # 1 NM = 1/60 degree latitude
+    return nm / 60.0
+
+def generate_notam_grid(spacing_nm: float = 100) -> List[Tuple[float, float]]:
+    """Generate a grid of coordinates covering the continental US."""
+    spacing_degrees = nm_to_degrees(spacing_nm)
+    grid_points = []
+
+    lat = CONUS_BOUNDS['min_lat']
+    while lat <= CONUS_BOUNDS['max_lat']:
+        lon = CONUS_BOUNDS['min_lon']
+        while lon <= CONUS_BOUNDS['max_lon']:
+            grid_points.append((lat, lon))
+            lon += spacing_degrees
+        lat += spacing_degrees
+
+    return grid_points
+
+def decimal_to_dms_notam(decimal_degrees: float) -> Dict:
+    """Convert decimal degrees to DMS format for NOTAM API."""
+    is_positive = decimal_degrees >= 0
+    decimal_degrees = abs(decimal_degrees)
+
+    degrees = int(decimal_degrees)
+    minutes_decimal = (decimal_degrees - degrees) * 60
+    minutes = int(minutes_decimal)
+    seconds = (minutes_decimal - minutes) * 60
+
+    return {
+        'degrees': degrees,
+        'minutes': minutes,
+        'seconds': int(seconds),
+        'direction': is_positive
+    }
+
+def fetch_notams_for_location(lat: float, lon: float, radius: int = 100) -> Optional[Dict]:
+    """Fetch NOTAMs for a specific geographic location."""
+    lat_dms = decimal_to_dms_notam(lat)
+    lon_dms = decimal_to_dms_notam(lon)
+
+    form_data = {
+        'searchType': '3',
+        'designatorsForLocation': '',
+        'designatorForAccountable': '',
+        'latDegrees': str(lat_dms['degrees']),
+        'latMinutes': str(lat_dms['minutes']),
+        'latSeconds': str(lat_dms['seconds']),
+        'longDegrees': str(lon_dms['degrees']),
+        'longMinutes': str(lon_dms['minutes']),
+        'longSeconds': str(lon_dms['seconds']),
+        'radius': str(radius),
+        'sortColumns': '5 false',
+        'sortDirection': 'true',
+        'designatorForNotamNumberSearch': '',
+        'notamNumber': '',
+        'radiusSearchOnDesignator': 'false',
+        'radiusSearchDesignator': '',
+        'latitudeDirection': 'N' if lat_dms['direction'] else 'S',
+        'longitudeDirection': 'W' if not lon_dms['direction'] else 'E',
+        'freeFormText': '',
+        'flightPathText': '',
+        'flightPathDivertAirfields': '',
+        'flightPathBuffer': '4',
+        'flightPathIncludeNavaids': 'true',
+        'flightPathIncludeArtcc': 'false',
+        'flightPathIncludeTfr': 'true',
+        'flightPathIncludeRegulatory': 'false',
+        'flightPathResultsType': 'All NOTAMs',
+        'archiveDate': '',
+        'archiveDesignator': '',
+        'offset': '0',
+        'notamsOnly': 'false',
+        'filters': '',
+        'recaptchaToken': ''
+    }
+
+    headers = {
+        'Content-Type': 'application/x-www-form-urlencoded; charset=utf-8',
+        'Accept': 'application/json, text/plain, */*',
+        'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36',
+        'Referer': 'https://notams.aim.faa.gov/notamSearch/nsapp.html',
+        'Origin': 'https://notams.aim.faa.gov'
+    }
+
+    for attempt in range(NOTAM_MAX_RETRIES):
+        try:
+            encoded_data = urlencode(form_data)
+            response = requests.post(
+                NOTAM_API_ENDPOINT,
+                data=encoded_data,
+                headers=headers,
+                timeout=NOTAM_REQUEST_TIMEOUT
+            )
+
+            if response.status_code == 200:
+                try:
+                    return response.json()
+                except json.JSONDecodeError:
+                    if attempt < NOTAM_MAX_RETRIES - 1:
+                        time.sleep(NOTAM_RETRY_DELAY)
+                        continue
+                    return None
+            else:
+                if attempt < NOTAM_MAX_RETRIES - 1:
+                    time.sleep(NOTAM_RETRY_DELAY)
+                    continue
+                return None
+
+        except Exception as e:
+            if attempt < NOTAM_MAX_RETRIES - 1:
+                time.sleep(NOTAM_RETRY_DELAY)
+                continue
+            return None
+
+    return None
+
+def parse_notam_date(date_str: str) -> Optional[datetime]:
+    """Parse NOTAM date string to datetime object."""
+    if not date_str or date_str.strip() == '':
+        return None
+
+    date_str = date_str.strip()
+
+    if date_str.upper() in ['PERM', 'PERMANENT', 'EST', 'ESTIMATED']:
+        return datetime(2099, 12, 31, 23, 59)
+
+    try:
+        parts = date_str.split()
+        if len(parts) >= 2:
+            date_part = parts[0]
+            time_part = parts[1]
+            month, day, year = date_part.split('/')
+
+            if len(time_part) == 4:
+                hour = int(time_part[:2])
+                minute = int(time_part[2:])
+            else:
+                hour = 0
+                minute = 0
+
+            return datetime(int(year), int(month), int(day), hour, minute)
+        elif len(parts) == 1:
+            date_part = parts[0]
+            month, day, year = date_part.split('/')
+            return datetime(int(year), int(month), int(day), 0, 0)
+    except (ValueError, IndexError):
+        return None
+
+    return None
+
+def parse_notam_coordinates(notam_geometry: str) -> Tuple[Optional[float], Optional[float]]:
+    """Parse NOTAM geometry to extract lat/lng coordinates."""
+    if not notam_geometry:
+        return None, None
+
+    try:
+        coords = json.loads(notam_geometry)
+        if isinstance(coords, list) and len(coords) == 2:
+            lon, lat = coords
+            return lat, lon
+    except (json.JSONDecodeError, ValueError):
+        pass
+
+    dms_pattern = r'(\d{6})([NS])(\d{7})([EW])'
+    match = re.match(dms_pattern, notam_geometry.replace(' ', ''))
+    if match:
+        lat_dms, lat_dir, lon_dms, lon_dir = match.groups()
+
+        lat_deg = int(lat_dms[0:2])
+        lat_min = int(lat_dms[2:4])
+        lat_sec = int(lat_dms[4:6])
+        lat_decimal = lat_deg + lat_min / 60 + lat_sec / 3600
+        if lat_dir == 'S':
+            lat_decimal = -lat_decimal
+
+        lon_deg = int(lon_dms[0:3])
+        lon_min = int(lon_dms[3:5])
+        lon_sec = int(lon_dms[5:7])
+        lon_decimal = lon_deg + lon_min / 60 + lon_sec / 3600
+        if lon_dir == 'W':
+            lon_decimal = -lon_decimal
+
+        return lat_decimal, lon_decimal
+
+    return None, None
+
+def extract_height_from_text(text: str) -> Optional[int]:
+    """Extract height in feet from NOTAM text."""
+    if not text:
+        return None
+
+    patterns = [
+        r'(\d+)\s*FT\s+AGL',
+        r'\((\d+)FT\s+AGL\)',
+        r'<b>\s*AGL:\s*</b>\s*<td>(\d+)\s*feet',
+    ]
+
+    for pattern in patterns:
+        match = re.search(pattern, text, re.IGNORECASE)
+        if match:
+            return int(match.group(1))
+
+    return None
+
+def filter_crane_notams(notams: List[Dict]) -> List[Dict]:
+    """Filter NOTAMs for crane-related obstructions with active date ranges."""
+    filtered = []
+    current_time = datetime.now()
+
+    for notam in notams:
+        feature_name = notam.get('featureName', '')
+        keyword = notam.get('keyword', '')
+        is_obstruction = (feature_name == 'Obstruction' or keyword == 'OBST')
+
+        if not is_obstruction:
+            continue
+
+        traditional_msg = notam.get('traditionalMessageFrom4thWord', '')
+        plain_msg = notam.get('plainLanguageMessage', '')
+        combined_text = f"{traditional_msg} {plain_msg}".upper()
+        has_crane = 'CRANE' in combined_text
+
+        if not has_crane:
+            continue
+
+        start_date_str = notam.get('startDate', '')
+        end_date_str = notam.get('endDate', '')
+        start_date = parse_notam_date(start_date_str)
+        end_date = parse_notam_date(end_date_str)
+
+        if start_date is None and end_date is None:
+            filtered.append(notam)
+            continue
+
+        is_active = True
+        if start_date and current_time < start_date:
+            is_active = False
+        if end_date and current_time > end_date:
+            is_active = False
+
+        if is_active:
+            filtered.append(notam)
+
+    return filtered
+
+def convert_notams_to_datafile_format(notams: List[Dict]) -> pd.DataFrame:
+    """Convert filtered NOTAM data to datafile format."""
+    if not notams:
+        return pd.DataFrame()
+
+    print(f"Converting {len(notams)} NOTAMs to datafile format")
+
+    output_columns = [
+        'STUDY (ASN)', 'PRIOR ASN', 'STATUS', 'DETERMINATION', 'ENTERED DATE',
+        'RECEIVED DATE', 'COMPLETION DATE', 'EXPIRATION DATE', 'LATITUDE',
+        'LONGITUDE', 'HORIZONTAL DATUM', 'SURVEY_ACCURACY', 'MARKING LIGHTING TYPE',
+        'MARKING LIGHTING TYPE OTHER', 'STRUCTURE NAME', 'STRUCTURE CITY',
+        'STRUCTURE COUNTY NAME', 'STRUCTURE COUNTY ID', 'STRUCTURE STATE',
+        'NEAREST AIRPORT', 'DISTANCE FROM AIRPORT', 'DIRECTION FROM AIRPORT',
+        'ON AIRPORT', 'PROPOSAL DESCRIPTION', 'LOCATION DESCRIPTION', 'NOTICE OF',
+        'DURATION', 'DURATION DAYS', 'DURATION MONTHS', 'WORK SCHEDULE BEGINNING DATE',
+        'WORK SCHEDULE ENDING DATE', 'DATE BUILT', 'FCC NUMBER', 'STRUCTURE TYPE',
+        'STRUCTURE TYPE OTHER', 'AGL HEIGHT DET', 'AGL HEIGHT DNE',
+        'AGL HEIGHT PROPOSED', 'ELEVATION', 'AMSL HEIGHT DET', 'AMSL HEIGHT DNE',
+        'AMSL HEIGHT PROPOSED', 'REPRESENTATIVE NAME ', 'SPONSOR NAME ',
+        'SIGNATURE CONTROL NUMBER ', 'FREQUENCY_JSON '
+    ]
+
+    rows = []
+
+    for notam in notams:
+        notam_geom = notam.get('notamGeometry', '')
+        lat_decimal, lon_decimal = parse_notam_coordinates(notam_geom)
+
+        latitude_dms = decimal_to_dms(lat_decimal, is_longitude=False) if lat_decimal else ''
+        longitude_dms = decimal_to_dms(lon_decimal, is_longitude=True) if lon_decimal else ''
+
+        combined_text = notam.get('traditionalMessageFrom4thWord', '') + ' ' + notam.get('plainLanguageMessage', '')
+        height_agl = extract_height_from_text(combined_text)
+
+        start_date_obj = parse_notam_date(notam.get('startDate', ''))
+        end_date_obj = parse_notam_date(notam.get('endDate', ''))
+        start_date_str = start_date_obj.strftime('%Y-%m-%d') if start_date_obj else ''
+        end_date_str = end_date_obj.strftime('%Y-%m-%d') if end_date_obj else ''
+
+        end_date_raw = notam.get('endDate', '')
+        duration = 'Permanent' if 'PERM' in end_date_raw.upper() else 'Temporary'
+
+        row = {
+            'STUDY (ASN)': notam.get('notamNumber', 'N/A'),
+            'PRIOR ASN': '',
+            'STATUS': 'Active NOTAM' if notam.get('status') == 'Active' else notam.get('status', ''),
+            'DETERMINATION': 'Obstruction',
+            'ENTERED DATE': datetime.now().strftime('%Y-%m-%d'),
+            'RECEIVED DATE': '',
+            'COMPLETION DATE': '',
+            'EXPIRATION DATE': end_date_str,
+            'LATITUDE': latitude_dms,
+            'LONGITUDE': longitude_dms,
+            'HORIZONTAL DATUM': '',
+            'SURVEY_ACCURACY': '',
+            'MARKING LIGHTING TYPE': '',
+            'MARKING LIGHTING TYPE OTHER': '',
+            'STRUCTURE NAME': '',
+            'STRUCTURE CITY': '',
+            'STRUCTURE COUNTY NAME': '',
+            'STRUCTURE COUNTY ID': '',
+            'STRUCTURE STATE': '',
+            'NEAREST AIRPORT': f"{notam.get('facilityDesignator', '')} ({notam.get('airportName', '')})" if notam.get('airportName') else notam.get('facilityDesignator', ''),
+            'DISTANCE FROM AIRPORT': '',
+            'DIRECTION FROM AIRPORT': '',
+            'ON AIRPORT': '',
+            'PROPOSAL DESCRIPTION': '',
+            'LOCATION DESCRIPTION': notam.get('traditionalMessageFrom4thWord', '')[:100],
+            'NOTICE OF': 'Temporary Obstruction',
+            'DURATION': duration,
+            'DURATION DAYS': '',
+            'DURATION MONTHS': '',
+            'WORK SCHEDULE BEGINNING DATE': start_date_str,
+            'WORK SCHEDULE ENDING DATE': end_date_str,
+            'DATE BUILT': '',
+            'FCC NUMBER': '',
+            'STRUCTURE TYPE': 'CRANE',
+            'STRUCTURE TYPE OTHER': '',
+            'AGL HEIGHT DET': height_agl if height_agl else '',
+            'AGL HEIGHT DNE': '',
+            'AGL HEIGHT PROPOSED': '',
+            'ELEVATION': '',
+            'AMSL HEIGHT DET': '',
+            'AMSL HEIGHT DNE': '',
+            'AMSL HEIGHT PROPOSED': '',
+            'REPRESENTATIVE NAME ': '',
+            'SPONSOR NAME ': '',
+            'SIGNATURE CONTROL NUMBER ': '',
+            'FREQUENCY_JSON ': ''
+        }
+
+        rows.append(row)
+
+    df = pd.DataFrame(rows, columns=output_columns)
+    df = df.dropna(subset=['LATITUDE', 'LONGITUDE'])
+    df = df[df['LATITUDE'] != '']
+    df = df[df['LONGITUDE'] != '']
+
+    # Add source indicator
+    df['DATA_SOURCE'] = 'NOTAM'
+
+    print(f"Converted {len(df)} NOTAMs to datafile format")
+    return df
+
+def fetch_and_process_notams(use_test_grid: bool = False) -> Optional[pd.DataFrame]:
+    """Fetch and process NOTAM data."""
+    print("=== Processing NOTAM Data ===")
+
+    try:
+        # Generate grid
+        if use_test_grid:
+            print("Using small test grid (4 points)...")
+            grid_points = [
+                (33.4484, -112.0740),  # Phoenix, AZ
+                (40.7128, -74.0060),   # New York, NY
+                (29.7604, -95.3698),   # Houston, TX
+                (47.6062, -122.3321)   # Seattle, WA
+            ]
+        else:
+            print("Generating NOTAM grid (100 NM spacing)...")
+            grid_points = generate_notam_grid(spacing_nm=100)
+
+        print(f"Grid points: {len(grid_points)}")
+        print(f"Estimated time: {(len(grid_points) * NOTAM_REQUEST_DELAY / 60):.1f} minutes")
+
+        # Fetch all NOTAMs
+        all_notams = []
+        start_time = time.time()
+
+        for i, (lat, lon) in enumerate(grid_points, 1):
+            if i % 10 == 0:
+                print(f"Progress: {i}/{len(grid_points)} ({i/len(grid_points)*100:.1f}%)")
+
+            response = fetch_notams_for_location(lat, lon, radius=100)
+
+            if response:
+                notams = []
+                if isinstance(response, list):
+                    notams = response
+                elif isinstance(response, dict) and 'notamList' in response:
+                    notams = response['notamList']
+
+                all_notams.extend(notams)
+
+            if i < len(grid_points):
+                time.sleep(NOTAM_REQUEST_DELAY)
+
+        elapsed_time = time.time() - start_time
+        print(f"Fetching complete in {elapsed_time/60:.1f} minutes")
+        print(f"Total NOTAMs collected: {len(all_notams)}")
+
+        # Deduplicate
+        seen = set()
+        unique_notams = []
+        for notam in all_notams:
+            notam_number = notam.get('notamNumber', '')
+            if notam_number and notam_number not in seen:
+                seen.add(notam_number)
+                unique_notams.append(notam)
+
+        print(f"Unique NOTAMs: {len(unique_notams)}")
+
+        # Filter for crane-related obstructions
+        filtered_notams = filter_crane_notams(unique_notams)
+        print(f"Crane-related NOTAMs: {len(filtered_notams)}")
+
+        # Convert to datafile format
+        notams_df = convert_notams_to_datafile_format(filtered_notams)
+
+        return notams_df
+
+    except Exception as e:
+        print(f"Error processing NOTAM data: {e}")
+        return None
+
 def main():
     """Main function to update FAA data."""
     try:
@@ -444,25 +887,64 @@ def main():
                     print(f"Failed to download data for {region}")
             except Exception as e:
                 print(f"Error processing {region}: {e}")
-        
-        # Merge all data
+
+        # Download and process NOTAM data
+        print("\n=== Processing NOTAM Data ===")
+        notam_converted = None
+        try:
+            # Use test grid for quick testing (set to False for production)
+            use_test_grid = False
+            notam_converted = fetch_and_process_notams(use_test_grid=use_test_grid)
+            if notam_converted is not None and not notam_converted.empty:
+                all_dataframes.append(notam_converted)
+                print(f"Successfully processed NOTAMs: {len(notam_converted)} records")
+            else:
+                print("No NOTAM records found or processing failed")
+        except Exception as e:
+            print(f"Error processing NOTAM data: {e}")
+            print("Continuing with DOF and Part77 data only")
+
+        # Merge all data (DOF + Part77 + NOTAMs)
         print("\n=== Merging All Data ===")
+
+        # Collect all dataframes for merging
+        all_merge_dfs = []
+        if dof_converted is not None and not dof_converted.empty:
+            all_merge_dfs.append(dof_converted)
+        if part77_dfs:
+            all_merge_dfs.extend(part77_dfs)
+        if notam_converted is not None and not notam_converted.empty:
+            all_merge_dfs.append(notam_converted)
+
+        # Use existing merge function for DOF + Part77
         merged_df = merge_dataframes(dof_converted, part77_dfs)
-        
+
+        # Add NOTAMs if available
+        if notam_converted is not None and not notam_converted.empty:
+            print(f"Adding {len(notam_converted)} NOTAM records to merged dataset")
+            merged_df = pd.concat([merged_df, notam_converted], ignore_index=True, sort=False)
+            print(f"Total records after adding NOTAMs: {len(merged_df)}")
+
         if merged_df.empty:
             print("No data to save!")
             return
-        
+
         # Save the merged datafile
         output_path = "public/data/datafile.csv"
         save_datafile(merged_df, output_path)
-        
+
         # Also save individual crane and Part 77 files for analysis
         if part77_dfs:
             part77_only = pd.concat(part77_dfs, ignore_index=True)
             part77_output = "public/data/part77-data.csv"
             save_datafile(part77_only, part77_output)
             print(f"Saved Part 77 data separately to {part77_output}")
+
+        # Save NOTAM data separately
+        if notam_converted is not None and not notam_converted.empty:
+            notam_output = "public/data/notams.csv"
+            save_datafile(notam_converted, notam_output)
+            print(f"Saved NOTAM data separately to {notam_output}")
         
         # Print summary statistics
         print("\n=== Summary ===")
