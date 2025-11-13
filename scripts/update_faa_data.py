@@ -708,6 +708,9 @@ async def fetch_notams_for_airport_async(session: aiohttp.ClientSession, icao_co
     }
 
     async with semaphore:
+        # Add delay at start to space out requests (gentler on API)
+        await asyncio.sleep(0.5)
+
         for attempt in range(NOTAM_MAX_RETRIES):
             try:
                 encoded_data = urlencode(form_data)
@@ -720,21 +723,24 @@ async def fetch_notams_for_airport_async(session: aiohttp.ClientSession, icao_co
                     if response.status == 200:
                         try:
                             return await response.json()
-                        except json.JSONDecodeError:
+                        except json.JSONDecodeError as e:
                             if attempt < NOTAM_MAX_RETRIES - 1:
                                 await asyncio.sleep(NOTAM_RETRY_DELAY)
                                 continue
+                            print(f"JSON decode error for airport {icao_code}: {e}")
                             return None
                     else:
                         if attempt < NOTAM_MAX_RETRIES - 1:
                             await asyncio.sleep(NOTAM_RETRY_DELAY)
                             continue
+                        print(f"HTTP {response.status} for airport {icao_code}")
                         return None
 
             except Exception as e:
                 if attempt < NOTAM_MAX_RETRIES - 1:
                     await asyncio.sleep(NOTAM_RETRY_DELAY)
                     continue
+                print(f"Exception fetching airport {icao_code}: {e}")
                 return None
 
         return None
@@ -789,6 +795,9 @@ async def fetch_notams_for_location_async(session: aiohttp.ClientSession, lat: f
     }
 
     async with semaphore:
+        # Add delay at start to space out requests (gentler on API)
+        await asyncio.sleep(0.5)
+
         for attempt in range(NOTAM_MAX_RETRIES):
             try:
                 encoded_data = urlencode(form_data)
@@ -801,21 +810,24 @@ async def fetch_notams_for_location_async(session: aiohttp.ClientSession, lat: f
                     if response.status == 200:
                         try:
                             return await response.json()
-                        except json.JSONDecodeError:
+                        except json.JSONDecodeError as e:
                             if attempt < NOTAM_MAX_RETRIES - 1:
                                 await asyncio.sleep(NOTAM_RETRY_DELAY)
                                 continue
+                            print(f"JSON decode error for location ({lat:.2f}, {lon:.2f}): {e}")
                             return None
                     else:
                         if attempt < NOTAM_MAX_RETRIES - 1:
                             await asyncio.sleep(NOTAM_RETRY_DELAY)
                             continue
+                        print(f"HTTP {response.status} for location ({lat:.2f}, {lon:.2f})")
                         return None
 
             except Exception as e:
                 if attempt < NOTAM_MAX_RETRIES - 1:
                     await asyncio.sleep(NOTAM_RETRY_DELAY)
                     continue
+                print(f"Exception fetching location ({lat:.2f}, {lon:.2f}): {e}")
                 return None
 
         return None
@@ -1054,20 +1066,22 @@ def convert_notams_to_datafile_format(notams: List[Dict]) -> pd.DataFrame:
     print(f"Converted {len(df)} NOTAMs to datafile format")
     return df
 
-async def fetch_all_notams_async(grid_points: List[Tuple[float, float]], airports: List[Tuple[str, float, float]], max_concurrent: int = 15) -> List[Dict]:
+async def fetch_all_notams_async(grid_points: List[Tuple[float, float]], airports: List[Tuple[str, float, float]], max_concurrent: int = 5) -> List[Dict]:
     """
     Fetch all NOTAMs asynchronously with controlled concurrency.
 
     Args:
         grid_points: List of (lat, lon) tuples for grid searches
         airports: List of (icao, lat, lon) tuples for airport searches
-        max_concurrent: Maximum number of concurrent requests (default: 15)
+        max_concurrent: Maximum number of concurrent requests (default: 5)
 
     Returns:
         List of all NOTAM responses
     """
     all_notams = []
     semaphore = asyncio.Semaphore(max_concurrent)
+    success_count = 0
+    failure_count = 0
 
     async with aiohttp.ClientSession() as session:
         # Create tasks for grid searches
@@ -1087,7 +1101,7 @@ async def fetch_all_notams_async(grid_points: List[Tuple[float, float]], airport
 
         print(f"Starting {len(grid_tasks)} grid searches and {len(airport_tasks)} airport searches...")
         print(f"Max concurrent requests: {max_concurrent}")
-        print(f"Estimated time: {(total_tasks / max_concurrent * 2):.1f} minutes (with retries)")
+        print(f"Estimated time: {(total_tasks / max_concurrent * 2.5):.1f} minutes (with delays and retries)")
 
         # Process tasks and show progress
         completed = 0
@@ -1095,10 +1109,8 @@ async def fetch_all_notams_async(grid_points: List[Tuple[float, float]], airport
             response = await coro
             completed += 1
 
-            if completed % 50 == 0 or completed == total_tasks:
-                print(f"Progress: {completed}/{total_tasks} ({completed/total_tasks*100:.1f}%)")
-
             if response:
+                success_count += 1
                 notams = []
                 if isinstance(response, list):
                     notams = response
@@ -1106,6 +1118,18 @@ async def fetch_all_notams_async(grid_points: List[Tuple[float, float]], airport
                     notams = response['notamList']
 
                 all_notams.extend(notams)
+            else:
+                failure_count += 1
+
+            if completed % 50 == 0 or completed == total_tasks:
+                print(f"Progress: {completed}/{total_tasks} ({completed/total_tasks*100:.1f}%) - Success: {success_count}, Failed: {failure_count}")
+
+            # Add small delay between processing completions to be gentle on the API
+            if completed < total_tasks:
+                await asyncio.sleep(0.1)
+
+        print(f"\nFinal: {success_count} successful, {failure_count} failed out of {total_tasks} total requests")
+        print(f"Success rate: {success_count/total_tasks*100:.1f}%")
 
     return all_notams
 
@@ -1136,7 +1160,7 @@ def fetch_and_process_notams(use_test_grid: bool = False) -> Optional[pd.DataFra
 
         # Fetch all NOTAMs asynchronously
         start_time = time.time()
-        all_notams = asyncio.run(fetch_all_notams_async(grid_points, airports, max_concurrent=15))
+        all_notams = asyncio.run(fetch_all_notams_async(grid_points, airports, max_concurrent=5))
 
         total_elapsed = time.time() - start_time
         print(f"\nTotal fetch time: {total_elapsed/60:.1f} minutes")
