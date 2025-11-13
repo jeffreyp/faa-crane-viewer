@@ -1,10 +1,10 @@
 // Real FAA crane data parser for CSV files from OE/AAA system
 import Papa from 'papaparse';
+import { NOTAM_PROXY_URL, NOTAM_CONFIG } from '../config';
 
 // Constants - using direct absolute path for webpack dev server
 const DOF_CSV_PATH = 'data/datafile.csv';
 const PART77_CSV_PATH = 'data/part77-data.csv';
-const NOTAM_CSV_PATH = 'data/notams.csv';
 
 // Convert DMS (Degrees-Minutes-Seconds) to decimal degrees or return decimal if already in decimal format
 const coordinateToDecimal = (coordStr) => {
@@ -130,24 +130,207 @@ const parseCSVData = async (csvData) => {
   });
 };
 
-// Fetch crane data from DOF, Part77, and NOTAM CSV files
+/**
+ * Convert decimal degrees to DMS format required by NOTAM API
+ */
+const decimalToDMS = (decimal) => {
+  const isPositive = decimal >= 0;
+  const absDecimal = Math.abs(decimal);
+
+  const degrees = Math.floor(absDecimal);
+  const minutesDecimal = (absDecimal - degrees) * 60;
+  const minutes = Math.floor(minutesDecimal);
+  const seconds = Math.floor((minutesDecimal - minutes) * 60);
+
+  return {
+    degrees: degrees.toString(),
+    minutes: minutes.toString(),
+    seconds: seconds.toString(),
+    direction: isPositive
+  };
+};
+
+/**
+ * Fetch NOTAMs from the Cloudflare Worker proxy
+ * @param {number} lat - Latitude in decimal degrees
+ * @param {number} lng - Longitude in decimal degrees
+ * @param {number} radiusNM - Search radius in nautical miles
+ * @returns {Promise<Array>} Array of NOTAM crane objects in standard format
+ */
+export const fetchNOTAMs = async (lat, lng, radiusNM) => {
+  // Check if NOTAM proxy is configured
+  if (!NOTAM_PROXY_URL) {
+    console.log('NOTAM proxy not configured, skipping NOTAM fetch');
+    return [];
+  }
+
+  try {
+    console.log(`Fetching NOTAMs from proxy for location: ${lat}, ${lng}, radius: ${radiusNM}nm`);
+
+    // Convert coordinates to DMS format
+    const latDMS = decimalToDMS(lat);
+    const lngDMS = decimalToDMS(lng);
+
+    // Build form data matching FAA NOTAM API format
+    const formData = new URLSearchParams({
+      'searchType': '3', // Geographic search
+      'designatorsForLocation': '',
+      'designatorForAccountable': '',
+      'latDegrees': latDMS.degrees,
+      'latMinutes': latDMS.minutes,
+      'latSeconds': latDMS.seconds,
+      'longDegrees': lngDMS.degrees,
+      'longMinutes': lngDMS.minutes,
+      'longSeconds': lngDMS.seconds,
+      'radius': Math.min(radiusNM, NOTAM_CONFIG.maxRadius).toString(),
+      'sortColumns': '5 false',
+      'sortDirection': 'true',
+      'designatorForNotamNumberSearch': '',
+      'notamNumber': '',
+      'radiusSearchOnDesignator': 'false',
+      'radiusSearchDesignator': '',
+      'latitudeDirection': lat >= 0 ? 'N' : 'S',
+      'longitudeDirection': lng >= 0 ? 'E' : 'W',
+      'freeFormText': '',
+      'flightPathText': '',
+      'flightPathDivertAirfields': '',
+      'flightPathBuffer': '4',
+      'flightPathIncludeNavaids': 'true',
+      'flightPathIncludeArtcc': 'false',
+      'flightPathIncludeTfr': 'true',
+      'flightPathIncludeRegulatory': 'false',
+      'flightPathResultsType': 'All NOTAMs',
+      'archiveDate': '',
+      'archiveDesignator': '',
+      'offset': '0',
+      'notamsOnly': 'false',
+      'filters': '',
+      'recaptchaToken': ''
+    });
+
+    // Fetch from Cloudflare Worker with timeout
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), NOTAM_CONFIG.timeout);
+
+    const response = await fetch(NOTAM_PROXY_URL, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded; charset=utf-8',
+        'Accept': 'application/json'
+      },
+      body: formData.toString(),
+      signal: controller.signal
+    });
+
+    clearTimeout(timeoutId);
+
+    if (!response.ok) {
+      throw new Error(`NOTAM proxy returned ${response.status}`);
+    }
+
+    const data = await response.json();
+    console.log(`Received ${data.notamList?.length || 0} NOTAMs from API`);
+
+    // Parse and filter NOTAMs for crane-related obstructions
+    return parseNOTAMResponse(data);
+
+  } catch (error) {
+    console.error('Error fetching NOTAMs:', error);
+    return []; // Return empty array on error, don't fail the entire search
+  }
+};
+
+/**
+ * Parse NOTAM API response and extract crane-related obstructions
+ * @param {Object} data - NOTAM API response
+ * @returns {Array} Array of crane objects in standard format
+ */
+const parseNOTAMResponse = (data) => {
+  if (!data.notamList || !Array.isArray(data.notamList)) {
+    return [];
+  }
+
+  const craneNotams = data.notamList.filter(notam => {
+    // Filter for obstruction class
+    const isObstruction = notam.classification === 'Airspace' &&
+                          (notam.obstacleClass === 'obstruction' ||
+                           notam.type === 'obstruction');
+
+    // Filter for crane-related
+    const condition = notam.condition || '';
+    const isCrane = condition.toLowerCase().includes('crane');
+
+    return isObstruction && isCrane;
+  });
+
+  console.log(`Filtered to ${craneNotams.length} crane-related NOTAMs`);
+
+  // Transform to standard format
+  return craneNotams.map(notam => {
+    // Parse coordinates from NOTAM
+    const lat = parseFloat(notam.coordinates?.latitude || 0);
+    const lng = parseFloat(notam.coordinates?.longitude || 0);
+
+    // Parse height (might be in feet or meters)
+    const height = parseInt(notam.obstacleHeight || notam.maxAltitude || '0');
+
+    // Parse dates
+    const startDate = notam.startDate || notam.effectiveStart || '';
+    const endDate = notam.endDate || notam.effectiveEnd || 'UNKNOWN';
+
+    // Create unique ID from NOTAM number
+    const notamNumber = notam.notamNumber || notam.number || `NOTAM-${lat}-${lng}`;
+
+    return {
+      id: notamNumber,
+      uniqueId: `${notamNumber}-NOTAM`,
+      structureType: 'Crane',
+      latitude: lat,
+      longitude: lng,
+      height: height,
+      heightUnit: 'ft AGL',
+      status: 'Active NOTAM',
+      startDate: startDate,
+      endDate: endDate,
+      sponsor: notam.issueOffice || notam.affectedFIR || '',
+      city: notam.location || '',
+      state: '',
+      dataSource: 'NOTAM',
+      condition: notam.condition || '',
+      icaoLocation: notam.icaoLocation || ''
+    };
+  }).filter(crane => crane.latitude !== 0 && crane.longitude !== 0);
+};
+
+// Fetch crane data from DOF, Part77 CSV files and on-demand NOTAMs
 export const fetchCraneData = async (location, radiusNM) => {
   try {
     console.log('Fetching crane data from DOF, Part77, and NOTAM sources...');
 
-    // Fetch all three CSV files in parallel
-    const [dofResponse, part77Response, notamResponse] = await Promise.all([
+    // Build array of fetch promises
+    const fetchPromises = [
       fetch(DOF_CSV_PATH),
-      fetch(PART77_CSV_PATH),
-      fetch(NOTAM_CSV_PATH)
-    ]);
+      fetch(PART77_CSV_PATH)
+    ];
 
-    if (!dofResponse.ok && !part77Response.ok && !notamResponse.ok) {
-      throw new Error(`Failed to fetch all CSV files: DOF ${dofResponse.status}, Part77 ${part77Response.status}, NOTAM ${notamResponse.status}`);
+    // Add NOTAM fetch if location is provided and proxy is configured
+    if (location && NOTAM_PROXY_URL) {
+      fetchPromises.push(fetchNOTAMs(location.lat, location.lng, radiusNM));
     }
-    
+
+    // Fetch DOF, Part77 CSVs and NOTAMs in parallel
+    const results = await Promise.all(fetchPromises);
+
+    const dofResponse = results[0];
+    const part77Response = results[1];
+    const notamCranes = results[2] || []; // NOTAMs or empty array
+
+    if (!dofResponse.ok && !part77Response.ok) {
+      throw new Error(`Failed to fetch CSV files: DOF ${dofResponse.status}, Part77 ${part77Response.status}`);
+    }
+
     let allCraneData = [];
-    
+
     // Process DOF data if available
     if (dofResponse.ok) {
       console.log('Processing DOF data...');
@@ -158,7 +341,7 @@ export const fetchCraneData = async (location, radiusNM) => {
     } else {
       console.warn('Failed to fetch DOF data:', dofResponse.status);
     }
-    
+
     // Process Part77 data if available
     if (part77Response.ok) {
       console.log('Processing Part77 data...');
@@ -170,15 +353,10 @@ export const fetchCraneData = async (location, radiusNM) => {
       console.warn('Failed to fetch Part77 data:', part77Response.status);
     }
 
-    // Process NOTAM data if available
-    if (notamResponse.ok) {
-      console.log('Processing NOTAM data...');
-      const notamText = await notamResponse.text();
-      const notamCranes = await parseCSVData(notamText);
+    // Add NOTAM data (already filtered and formatted)
+    if (notamCranes.length > 0) {
+      console.log(`Adding ${notamCranes.length} NOTAM cranes`);
       allCraneData.push(...notamCranes);
-      console.log(`Loaded ${notamCranes.length} NOTAM cranes`);
-    } else {
-      console.warn('Failed to fetch NOTAM data:', notamResponse.status);
     }
 
     console.log(`Total cranes loaded: ${allCraneData.length}`);
@@ -195,21 +373,25 @@ export const fetchCraneData = async (location, radiusNM) => {
     allCraneData = Array.from(uniqueCranes.values());
     console.log(`After deduplication: ${allCraneData.length} unique cranes`);
 
-    // Filter data based on location and radius
+    // Filter data based on location and radius (DOF/Part77 only, NOTAMs already filtered)
     if (location && radiusNM) {
-      allCraneData = allCraneData.filter(crane =>
-        isPointWithinRadius(location, crane, radiusNM)
-      );
+      allCraneData = allCraneData.filter(crane => {
+        // Skip filtering for NOTAMs as they're already filtered by the API
+        if (crane.dataSource === 'NOTAM') {
+          return true;
+        }
+        return isPointWithinRadius(location, crane, radiusNM);
+      });
       console.log(`Filtered to ${allCraneData.length} cranes within ${radiusNM}nm radius`);
     }
-    
+
     return { data: allCraneData, usedMockData: false };
   } catch (error) {
     console.error('Error fetching crane data:', error);
-    
+
     // Return mock data as fallback with a flag indicating mock data was used
-    return { 
-      data: MOCK_CRANE_DATA, 
+    return {
+      data: MOCK_CRANE_DATA,
       usedMockData: true,
       error: error.message || 'Failed to load CSV data'
     };

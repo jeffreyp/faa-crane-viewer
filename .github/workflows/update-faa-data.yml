@@ -15,23 +15,23 @@ on:
 jobs:
   update-data:
     runs-on: ubuntu-latest
-    timeout-minutes: 45  # Async with 5 concurrent + delays: ~15-20 min for NOTAMs + 2 min for DOF/Part77
+    timeout-minutes: 10  # DOF + Part77 typically complete in 2-3 minutes
     permissions:
       contents: write
 
     steps:
     - name: Checkout repository
       uses: actions/checkout@v4
-      
+
     - name: Set up Python
       uses: actions/setup-python@v4
       with:
         python-version: '3.11'
-        
+
     - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
-        pip install requests pandas aiohttp
+        pip install requests pandas
         
     - name: Download and process FAA data
       id: download-data
@@ -73,7 +73,7 @@ jobs:
       run: |
         git config --local user.email "action@github.com"
         git config --local user.name "GitHub Action"
-        git add public/data/datafile.csv public/data/part77-data.csv public/data/notams.csv public/data/regions/*.csv
+        git add public/data/datafile.csv public/data/part77-data.csv public/data/regions/*.csv
         git commit -m "Update FAA obstacle data - $(date +'%Y-%m-%d')"
 
         # Try to push, if it fails due to updates, pull and retry
@@ -83,7 +83,7 @@ jobs:
           echo "Push failed, pulling latest changes and retrying..."
 
           # Add any additional unstaged changes that may have been created
-          git add public/data/datafile.csv public/data/part77-data.csv public/data/notams.csv public/data/regions/*.csv
+          git add public/data/datafile.csv public/data/part77-data.csv public/data/regions/*.csv
 
           # Stash any changes (staged or unstaged)
           git stash --include-untracked
@@ -95,7 +95,7 @@ jobs:
           if git stash list | grep -q "stash@{0}"; then
             git stash pop
             # Re-add and commit any files that were stashed
-            git add public/data/datafile.csv public/data/part77-data.csv public/data/notams.csv public/data/regions/*.csv
+            git add public/data/datafile.csv public/data/part77-data.csv public/data/regions/*.csv
             if ! git diff --cached --quiet || ! git diff --quiet; then
               git commit --amend --no-edit
             fi
