@@ -19,6 +19,8 @@ import tempfile
 from pathlib import Path
 from urllib.parse import urlencode
 from typing import Dict, List, Tuple, Optional
+import asyncio
+import aiohttp
 
 # FAA Region codes for Part 77 data
 FAA_REGIONS = [
@@ -675,6 +677,149 @@ def fetch_notams_for_location(lat: float, lon: float, radius: int = 100) -> Opti
 
     return None
 
+async def fetch_notams_for_airport_async(session: aiohttp.ClientSession, icao_code: str, semaphore: asyncio.Semaphore) -> Optional[Dict]:
+    """
+    Async version: Fetch NOTAMs for a specific airport by ICAO code.
+    """
+    form_data = {
+        'searchType': '0',
+        'designatorsForLocation': icao_code,
+        'designatorForAccountable': '',
+        'retrieveLocId': icao_code,
+        'reportType': 'Raw',
+        'actionType': 'notamRetrievalByICAOs',
+        'formatType': 'DOMESTIC',
+        'offset': '0',
+        'notamsOnly': 'false',
+        'filters': '',
+        'archiveDate': '',
+        'archiveDesignator': '',
+        'radius': '100',
+        'sortColumns': '5 false',
+        'sortDirection': 'true',
+    }
+
+    headers = {
+        'Content-Type': 'application/x-www-form-urlencoded; charset=utf-8',
+        'Accept': 'application/json, text/plain, */*',
+        'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36',
+        'Referer': 'https://notams.aim.faa.gov/notamSearch/nsapp.html',
+        'Origin': 'https://notams.aim.faa.gov'
+    }
+
+    async with semaphore:
+        for attempt in range(NOTAM_MAX_RETRIES):
+            try:
+                encoded_data = urlencode(form_data)
+                async with session.post(
+                    NOTAM_API_ENDPOINT,
+                    data=encoded_data,
+                    headers=headers,
+                    timeout=aiohttp.ClientTimeout(total=NOTAM_REQUEST_TIMEOUT)
+                ) as response:
+                    if response.status == 200:
+                        try:
+                            return await response.json()
+                        except json.JSONDecodeError:
+                            if attempt < NOTAM_MAX_RETRIES - 1:
+                                await asyncio.sleep(NOTAM_RETRY_DELAY)
+                                continue
+                            return None
+                    else:
+                        if attempt < NOTAM_MAX_RETRIES - 1:
+                            await asyncio.sleep(NOTAM_RETRY_DELAY)
+                            continue
+                        return None
+
+            except Exception as e:
+                if attempt < NOTAM_MAX_RETRIES - 1:
+                    await asyncio.sleep(NOTAM_RETRY_DELAY)
+                    continue
+                return None
+
+        return None
+
+async def fetch_notams_for_location_async(session: aiohttp.ClientSession, lat: float, lon: float, radius: int, semaphore: asyncio.Semaphore) -> Optional[Dict]:
+    """Async version: Fetch NOTAMs for a specific geographic location."""
+    lat_dms = decimal_to_dms_notam(lat)
+    lon_dms = decimal_to_dms_notam(lon)
+
+    form_data = {
+        'searchType': '3',
+        'designatorsForLocation': '',
+        'designatorForAccountable': '',
+        'latDegrees': str(lat_dms['degrees']),
+        'latMinutes': str(lat_dms['minutes']),
+        'latSeconds': str(lat_dms['seconds']),
+        'longDegrees': str(lon_dms['degrees']),
+        'longMinutes': str(lon_dms['minutes']),
+        'longSeconds': str(lon_dms['seconds']),
+        'radius': str(radius),
+        'sortColumns': '5 false',
+        'sortDirection': 'true',
+        'designatorForNotamNumberSearch': '',
+        'notamNumber': '',
+        'radiusSearchOnDesignator': 'false',
+        'radiusSearchDesignator': '',
+        'latitudeDirection': 'N' if lat_dms['direction'] else 'S',
+        'longitudeDirection': 'W' if not lon_dms['direction'] else 'E',
+        'freeFormText': '',
+        'flightPathText': '',
+        'flightPathDivertAirfields': '',
+        'flightPathBuffer': '4',
+        'flightPathIncludeNavaids': 'true',
+        'flightPathIncludeArtcc': 'false',
+        'flightPathIncludeTfr': 'true',
+        'flightPathIncludeRegulatory': 'false',
+        'flightPathResultsType': 'All NOTAMs',
+        'archiveDate': '',
+        'archiveDesignator': '',
+        'offset': '0',
+        'notamsOnly': 'false',
+        'filters': '',
+        'recaptchaToken': ''
+    }
+
+    headers = {
+        'Content-Type': 'application/x-www-form-urlencoded; charset=utf-8',
+        'Accept': 'application/json, text/plain, */*',
+        'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36',
+        'Referer': 'https://notams.aim.faa.gov/notamSearch/nsapp.html',
+        'Origin': 'https://notams.aim.faa.gov'
+    }
+
+    async with semaphore:
+        for attempt in range(NOTAM_MAX_RETRIES):
+            try:
+                encoded_data = urlencode(form_data)
+                async with session.post(
+                    NOTAM_API_ENDPOINT,
+                    data=encoded_data,
+                    headers=headers,
+                    timeout=aiohttp.ClientTimeout(total=NOTAM_REQUEST_TIMEOUT)
+                ) as response:
+                    if response.status == 200:
+                        try:
+                            return await response.json()
+                        except json.JSONDecodeError:
+                            if attempt < NOTAM_MAX_RETRIES - 1:
+                                await asyncio.sleep(NOTAM_RETRY_DELAY)
+                                continue
+                            return None
+                    else:
+                        if attempt < NOTAM_MAX_RETRIES - 1:
+                            await asyncio.sleep(NOTAM_RETRY_DELAY)
+                            continue
+                        return None
+
+            except Exception as e:
+                if attempt < NOTAM_MAX_RETRIES - 1:
+                    await asyncio.sleep(NOTAM_RETRY_DELAY)
+                    continue
+                return None
+
+        return None
+
 def parse_notam_date(date_str: str) -> Optional[datetime]:
     """Parse NOTAM date string to datetime object."""
     if not date_str or date_str.strip() == '':
@@ -909,6 +1054,61 @@ def convert_notams_to_datafile_format(notams: List[Dict]) -> pd.DataFrame:
     print(f"Converted {len(df)} NOTAMs to datafile format")
     return df
 
+async def fetch_all_notams_async(grid_points: List[Tuple[float, float]], airports: List[Tuple[str, float, float]], max_concurrent: int = 15) -> List[Dict]:
+    """
+    Fetch all NOTAMs asynchronously with controlled concurrency.
+
+    Args:
+        grid_points: List of (lat, lon) tuples for grid searches
+        airports: List of (icao, lat, lon) tuples for airport searches
+        max_concurrent: Maximum number of concurrent requests (default: 15)
+
+    Returns:
+        List of all NOTAM responses
+    """
+    all_notams = []
+    semaphore = asyncio.Semaphore(max_concurrent)
+
+    async with aiohttp.ClientSession() as session:
+        # Create tasks for grid searches
+        grid_tasks = [
+            fetch_notams_for_location_async(session, lat, lon, 100, semaphore)
+            for lat, lon in grid_points
+        ]
+
+        # Create tasks for airport searches
+        airport_tasks = [
+            fetch_notams_for_airport_async(session, icao, semaphore)
+            for icao, lat, lon in airports
+        ]
+
+        all_tasks = grid_tasks + airport_tasks
+        total_tasks = len(all_tasks)
+
+        print(f"Starting {len(grid_tasks)} grid searches and {len(airport_tasks)} airport searches...")
+        print(f"Max concurrent requests: {max_concurrent}")
+        print(f"Estimated time: {(total_tasks / max_concurrent * 2):.1f} minutes (with retries)")
+
+        # Process tasks and show progress
+        completed = 0
+        for coro in asyncio.as_completed(all_tasks):
+            response = await coro
+            completed += 1
+
+            if completed % 50 == 0 or completed == total_tasks:
+                print(f"Progress: {completed}/{total_tasks} ({completed/total_tasks*100:.1f}%)")
+
+            if response:
+                notams = []
+                if isinstance(response, list):
+                    notams = response
+                elif isinstance(response, dict) and 'notamList' in response:
+                    notams = response['notamList']
+
+                all_notams.extend(notams)
+
+    return all_notams
+
 def fetch_and_process_notams(use_test_grid: bool = False) -> Optional[pd.DataFrame]:
     """Fetch and process NOTAM data."""
     print("=== Processing NOTAM Data ===")
@@ -923,66 +1123,20 @@ def fetch_and_process_notams(use_test_grid: bool = False) -> Optional[pd.DataFra
                 (29.7604, -95.3698),   # Houston, TX
                 (47.6062, -122.3321)   # Seattle, WA
             ]
+            airports = []  # Skip airports for test grid
         else:
             print("Generating NOTAM grid (75 NM spacing for better coverage)...")
             grid_points = generate_notam_grid(spacing_nm=75)
-
-        print(f"Grid points: {len(grid_points)}")
-        print(f"Estimated time: {(len(grid_points) * NOTAM_REQUEST_DELAY / 60):.1f} minutes")
-
-        # Fetch all NOTAMs
-        all_notams = []
-        start_time = time.time()
-
-        for i, (lat, lon) in enumerate(grid_points, 1):
-            if i % 10 == 0:
-                print(f"Progress: {i}/{len(grid_points)} ({i/len(grid_points)*100:.1f}%)")
-
-            response = fetch_notams_for_location(lat, lon, radius=100)
-
-            if response:
-                notams = []
-                if isinstance(response, list):
-                    notams = response
-                elif isinstance(response, dict) and 'notamList' in response:
-                    notams = response['notamList']
-
-                all_notams.extend(notams)
-
-            if i < len(grid_points):
-                time.sleep(NOTAM_REQUEST_DELAY)
-
-        elapsed_time = time.time() - start_time
-        print(f"Grid search complete in {elapsed_time/60:.1f} minutes")
-        print(f"NOTAMs from grid search: {len(all_notams)}")
-
-        # Supplement with airport searches for better coverage
-        if not use_test_grid:
             print("\n=== Supplementing with Airport Searches ===")
             airports = get_major_airports()
-            print(f"Querying {len(airports)} US medium/large airports...")
 
-            airport_start = time.time()
-            for i, (icao, lat, lon) in enumerate(airports, 1):
-                if i % 5 == 0:
-                    print(f"Airport progress: {i}/{len(airports)}")
+        print(f"Grid points: {len(grid_points)}")
+        print(f"Airports: {len(airports)}")
+        print(f"Total queries: {len(grid_points) + len(airports)}")
 
-                response = fetch_notams_for_airport(icao)
-
-                if response:
-                    notams = []
-                    if isinstance(response, list):
-                        notams = response
-                    elif isinstance(response, dict) and 'notamList' in response:
-                        notams = response['notamList']
-
-                    all_notams.extend(notams)
-
-                if i < len(airports):
-                    time.sleep(NOTAM_REQUEST_DELAY)
-
-            airport_elapsed = time.time() - airport_start
-            print(f"Airport search complete in {airport_elapsed/60:.1f} minutes")
+        # Fetch all NOTAMs asynchronously
+        start_time = time.time()
+        all_notams = asyncio.run(fetch_all_notams_async(grid_points, airports, max_concurrent=15))
 
         total_elapsed = time.time() - start_time
         print(f"\nTotal fetch time: {total_elapsed/60:.1f} minutes")
@@ -1010,6 +1164,8 @@ def fetch_and_process_notams(use_test_grid: bool = False) -> Optional[pd.DataFra
 
     except Exception as e:
         print(f"Error processing NOTAM data: {e}")
+        import traceback
+        traceback.print_exc()
         return None
 
 def main():
