@@ -15,7 +15,7 @@ on:
 jobs:
   update-data:
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 60  # 75 NM grid (940 pts) + 30 airports ≈ 37 min; DOF/Part77 ≈ 5 min
     permissions:
       contents: write
 

@@ -435,6 +435,109 @@ def generate_notam_grid(spacing_nm: float = 100) -> List[Tuple[float, float]]:
 
     return grid_points
 
+def get_major_airports() -> List[Tuple[str, float, float]]:
+    """
+    Get list of major US airports to supplement geographic grid search.
+    Returns list of (ICAO_code, latitude, longitude) tuples.
+    """
+    # Top 50 busiest US airports by location - these are most likely to have
+    # nearby construction/crane activity that could be missed by grid search
+    return [
+        ('KATL', 33.6407, -84.4277),   # Atlanta
+        ('KORD', 41.9742, -87.9073),   # Chicago O'Hare
+        ('KDFW', 32.8998, -97.0403),   # Dallas/Fort Worth
+        ('KDEN', 39.8561, -104.6737),  # Denver
+        ('KLAX', 33.9416, -118.4085),  # Los Angeles
+        ('KSFO', 37.6213, -122.3790),  # San Francisco
+        ('KLAS', 36.0840, -115.1537),  # Las Vegas
+        ('KPHX', 33.4373, -112.0078),  # Phoenix
+        ('KIAH', 29.9902, -95.3368),   # Houston
+        ('KMIA', 25.7959, -80.2870),   # Miami
+        ('KJFK', 40.6413, -73.7781),   # New York JFK
+        ('KEWR', 40.6895, -74.1745),   # Newark
+        ('KMCO', 28.4312, -81.3081),   # Orlando
+        ('KSEA', 47.4502, -122.3088),  # Seattle
+        ('KBOS', 42.3656, -71.0096),   # Boston
+        ('KPHL', 39.8744, -75.2424),   # Philadelphia
+        ('KDTW', 42.2162, -83.3554),   # Detroit
+        ('KMSN', 43.1399, -89.3375),   # Minneapolis
+        ('KSLC', 40.7899, -111.9791),  # Salt Lake City
+        ('KBWI', 39.1774, -76.6684),   # Baltimore
+        ('KTPA', 27.9755, -82.5332),   # Tampa
+        ('KPDX', 45.5898, -122.5951),  # Portland
+        ('KSAN', 32.7336, -117.1897),  # San Diego
+        ('KSTL', 38.7499, -90.3700),   # St. Louis
+        ('KCLT', 35.2144, -80.9473),   # Charlotte
+        ('KAUS', 30.1945, -97.6699),   # Austin
+        ('KBNA', 36.1245, -86.6782),   # Nashville
+        ('KOAK', 37.7126, -122.2197),  # Oakland
+        ('KSAT', 29.5337, -98.4698),   # San Antonio
+        ('KSNA', 33.6762, -117.8681),  # Orange County
+    ]
+
+def fetch_notams_for_airport(icao_code: str) -> Optional[Dict]:
+    """
+    Fetch NOTAMs for a specific airport by ICAO code.
+    This supplements the geographic grid search.
+    """
+    form_data = {
+        'searchType': '0',  # ICAO search
+        'designatorsForLocation': icao_code,
+        'designatorForAccountable': '',
+        'retrieveLocId': icao_code,
+        'reportType': 'Raw',
+        'actionType': 'notamRetrievalByICAOs',
+        'formatType': 'DOMESTIC',
+        'offset': '0',
+        'notamsOnly': 'false',
+        'filters': '',
+        'archiveDate': '',
+        'archiveDesignator': '',
+        'radius': '100',  # Also get NOTAMs within 100 NM of the airport
+        'sortColumns': '5 false',
+        'sortDirection': 'true',
+    }
+
+    headers = {
+        'Content-Type': 'application/x-www-form-urlencoded; charset=utf-8',
+        'Accept': 'application/json, text/plain, */*',
+        'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36',
+        'Referer': 'https://notams.aim.faa.gov/notamSearch/nsapp.html',
+        'Origin': 'https://notams.aim.faa.gov'
+    }
+
+    for attempt in range(NOTAM_MAX_RETRIES):
+        try:
+            encoded_data = urlencode(form_data)
+            response = requests.post(
+                NOTAM_API_ENDPOINT,
+                data=encoded_data,
+                headers=headers,
+                timeout=NOTAM_REQUEST_TIMEOUT
+            )
+
+            if response.status_code == 200:
+                try:
+                    return response.json()
+                except json.JSONDecodeError:
+                    if attempt < NOTAM_MAX_RETRIES - 1:
+                        time.sleep(NOTAM_RETRY_DELAY)
+                        continue
+                    return None
+            else:
+                if attempt < NOTAM_MAX_RETRIES - 1:
+                    time.sleep(NOTAM_RETRY_DELAY)
+                    continue
+                return None
+
+        except Exception as e:
+            if attempt < NOTAM_MAX_RETRIES - 1:
+                time.sleep(NOTAM_RETRY_DELAY)
+                continue
+            return None
+
+    return None
+
 def decimal_to_dms_notam(decimal_degrees: float) -> Dict:
     """Convert decimal degrees to DMS format for NOTAM API."""
     is_positive = decimal_degrees >= 0
@@ -782,8 +885,8 @@ def fetch_and_process_notams(use_test_grid: bool = False) -> Optional[pd.DataFra
                 (47.6062, -122.3321)   # Seattle, WA
             ]
         else:
-            print("Generating NOTAM grid (100 NM spacing)...")
-            grid_points = generate_notam_grid(spacing_nm=100)
+            print("Generating NOTAM grid (75 NM spacing for better coverage)...")
+            grid_points = generate_notam_grid(spacing_nm=75)
 
         print(f"Grid points: {len(grid_points)}")
         print(f"Estimated time: {(len(grid_points) * NOTAM_REQUEST_DELAY / 60):.1f} minutes")
@@ -811,7 +914,39 @@ def fetch_and_process_notams(use_test_grid: bool = False) -> Optional[pd.DataFra
                 time.sleep(NOTAM_REQUEST_DELAY)
 
         elapsed_time = time.time() - start_time
-        print(f"Fetching complete in {elapsed_time/60:.1f} minutes")
+        print(f"Grid search complete in {elapsed_time/60:.1f} minutes")
+        print(f"NOTAMs from grid search: {len(all_notams)}")
+
+        # Supplement with major airport searches for better coverage
+        if not use_test_grid:
+            print("\n=== Supplementing with Major Airport Searches ===")
+            airports = get_major_airports()
+            print(f"Querying {len(airports)} major airports...")
+
+            airport_start = time.time()
+            for i, (icao, lat, lon) in enumerate(airports, 1):
+                if i % 5 == 0:
+                    print(f"Airport progress: {i}/{len(airports)}")
+
+                response = fetch_notams_for_airport(icao)
+
+                if response:
+                    notams = []
+                    if isinstance(response, list):
+                        notams = response
+                    elif isinstance(response, dict) and 'notamList' in response:
+                        notams = response['notamList']
+
+                    all_notams.extend(notams)
+
+                if i < len(airports):
+                    time.sleep(NOTAM_REQUEST_DELAY)
+
+            airport_elapsed = time.time() - airport_start
+            print(f"Airport search complete in {airport_elapsed/60:.1f} minutes")
+
+        total_elapsed = time.time() - start_time
+        print(f"\nTotal fetch time: {total_elapsed/60:.1f} minutes")
         print(f"Total NOTAMs collected: {len(all_notams)}")
 
         # Deduplicate
