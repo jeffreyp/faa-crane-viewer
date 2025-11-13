@@ -35,16 +35,28 @@ Part 77 data includes structures that have been evaluated for their aeronautical
 
 ### 3. NOTAMs (Notices to Airmen)
 - **URL:** https://notams.aim.faa.gov/notamSearch/
-- **Coverage:** Continental USA via geographic grid search
+- **Coverage:** Continental USA via hybrid search strategy
 - **Format:** JSON API responses converted to CSV
-- **Records:** 500-2,000 active temporary crane obstructions
+- **Records:** Varies (typically 10-50 active temporary crane obstructions)
 
-NOTAMs provide real-time information about temporary obstructions. The automation performs:
-- Geographic grid search (~1,500 points, 100 NM spacing covering CONUS)
+NOTAMs provide real-time information about temporary obstructions. The automation performs a dual-search strategy:
+
+**Geographic Grid Search:**
+- 940 grid points at 75 NM spacing (improved from 100 NM)
+- 100 NM search radius per point
+- Complete CONUS coverage with better redundancy
+
+**Airport Supplemental Search:**
+- 30 major US airports queried by ICAO code (KATL, KORD, KDFW, KDEN, KLAX, KSFO, KPHX, KIAH, KMIA, KJFK, etc.)
+- 100 NM search radius per airport
+- Targets high-traffic areas where crane activity is most likely
+
+**Processing:**
 - Filtering for class=obstruction and condition contains "CRANE"
 - Active date validation (current date within NOTAM start/end dates)
+- Deduplication by NOTAM number across both search methods
 - 2-second delay between requests for rate limiting
-- **Runtime:** ~50 minutes for full grid coverage
+- **Runtime:** ~32 minutes (31 min grid + 1 min airports)
 
 ## GitHub Actions Workflow
 
@@ -61,7 +73,7 @@ The `.github/workflows/update-faa-data.yml` workflow automatically:
 - Commits and pushes changes if data has been updated
 - Rebuilds and redeploys to GitHub Pages
 
-**Note:** The workflow has a 60-minute timeout to accommodate the NOTAM grid search (~50 minutes).
+**Note:** The workflow has a 60-minute timeout to accommodate the NOTAM search (~32 minutes grid + ~1 minute airports = ~37 minutes total with DOF/Part77 processing).
 
 ## Manual Testing
 
@@ -158,11 +170,30 @@ is_active = start_datetime <= current_date <= end_datetime
 ```
 
 **Test vs Production Mode:**
-To switch between test grid (4 points, ~2 minutes) and production grid (~1,500 points, ~50 minutes):
+To switch between test grid (4 points, ~2 minutes) and production grid (940 points + 30 airports, ~32 minutes):
 
 ```python
 # update_faa_data.py line 896
 use_test_grid = False  # Set to True for testing, False for production
+```
+
+**Grid Spacing Configuration:**
+The grid spacing can be adjusted in the `fetch_and_process_notams` function:
+
+```python
+# update_faa_data.py line 886
+grid_points = generate_notam_grid(spacing_nm=75)  # Current: 75 NM (940 points)
+# Alternative: spacing_nm=100 (525 points, faster but less coverage)
+# Alternative: spacing_nm=50 (2100 points, more coverage but slower)
+```
+
+**Airport Search:**
+The list of major airports is defined in `get_major_airports()` (line 438). To modify:
+
+```python
+# Add or remove airports from the list
+# Format: ('ICAO_CODE', latitude, longitude)
+('KPHX', 33.4373, -112.0078),  # Phoenix Sky Harbor
 ```
 
 ### JavaScript Script (`merge-faa-data.js`)
@@ -187,13 +218,19 @@ const craneKeywords = ['CRANE', 'TOWER', 'MOBILE CRANE', 'CONSTRUCTION CRANE', '
 - Check console output for "Crane-related NOTAMs: X" message
 
 **NOTAM fetch timeout:**
-- Production grid takes ~50 minutes with 2-second delays
+- Production search takes ~32 minutes (940 grid points + 30 airports with 2-second delays)
 - GitHub Actions has 60-minute timeout configured
-- For faster testing, set `use_test_grid = True`
+- For faster testing, set `use_test_grid = True` (reduces to 4 points)
+
+**Specific NOTAMs not appearing:**
+- The FAA NOTAM Search API has known limitations
+- Some NOTAMs visible on the web interface may not be returned via API
+- The hybrid search strategy (grid + airports) helps but cannot guarantee 100% capture
+- Example: NOTAM 10/123 (KPHX crane) was visible on the web but not returned by either geographic or ICAO searches
 
 **Rate limiting errors:**
-- Default delay is 2 seconds between requests
-- Increase delay in `fetch_and_process_notams()` if needed:
+- Default delay is 2 seconds between requests (line 38: `NOTAM_REQUEST_DELAY = 2.0`)
+- Increase delay if rate limited:
   ```python
-  time.sleep(2)  # Increase this value if rate limited
+  NOTAM_REQUEST_DELAY = 3.0  # Increase this value if rate limited
   ```

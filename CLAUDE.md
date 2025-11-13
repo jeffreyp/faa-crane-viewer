@@ -236,7 +236,7 @@ bd stats
 
 ---
 
-## Current Work: NOTAM Integration
+## NOTAM Integration - COMPLETED ✅
 
 ### Goal
 
@@ -244,7 +244,7 @@ Add **NOTAMs (Notices to Airmen)** as a third data source for crane-related temp
 
 ### Requirements
 
-- **Search Method:** Geographic (lat/lng + radius in nautical miles)
+- **Search Method:** Hybrid approach (geographic grid + airport searches)
 - **Filtering:**
   - class = "obstruction"
   - condition contains "CRANE" (case-insensitive)
@@ -256,17 +256,21 @@ Add **NOTAMs (Notices to Airmen)** as a third data source for crane-related temp
 ### Current Status
 
 **Epic:** `faa-crane-viewer-pvk` (P2, open)
-**Implementation:** Complete - NOTAM integration successfully deployed
-**Remaining Tasks:** pvk.10 (data source filters UI), pvk.12 (documentation - in progress)
+**Implementation:** Complete with enhanced coverage improvements
+**Remaining Tasks:** pvk.10 (data source filters UI)
 
 **✅ Completed Implementation:**
 - API endpoint discovered: `https://notams.aim.faa.gov/notamSearch/search`
-- Backend: Full NOTAM fetching integrated into `update_faa_data.py`
+- Backend: Hybrid NOTAM fetching strategy with enhanced coverage
+  - Geographic grid search: 940 points at 75 NM spacing
+  - Airport supplemental search: 30 major US airports by ICAO code
+  - Deduplication across both search methods
 - Frontend: NOTAM data loading, orange pulsing triangle markers, custom popups
-- GitHub Actions: 60-minute timeout configured
-- Testing: End-to-end verification with test grid completed
+- GitHub Actions: 60-minute timeout (runtime ~37 minutes total)
+- Testing: End-to-end verification completed
+- Documentation: All README files updated with hybrid search details
 
-**Tasks Completed (pvk.1 through pvk.11):**
+**Tasks Completed (pvk.1 through pvk.12):**
 1. pvk.1 - Reverse engineer NOTAM Search API ✅
 2. pvk.2 - Test Python access to NOTAM API ✅
 3. pvk.3 - Analyze NOTAM response format ✅
@@ -277,9 +281,14 @@ Add **NOTAMs (Notices to Airmen)** as a third data source for crane-related temp
 8. pvk.8 - Create distinct visual styling for NOTAM markers ✅
 9. pvk.9 - Update popups and table for NOTAM-specific fields ✅
 10. pvk.11 - End-to-end testing and validation ✅
+11. pvk.12 - Documentation updates for all three sources ✅
 
-**Current Work:**
-- pvk.12 - Updating documentation (README.md, scripts/README.md, CLAUDE.md)
+**Coverage Improvements (2025-11-12):**
+After investigating missing NOTAM 10/123 (KPHX crane), implemented enhanced search:
+- Increased grid density: 100 NM → 75 NM spacing (+79% more points)
+- Added airport-based searches to supplement geographic queries
+- Addresses FAA API limitations where some NOTAMs don't appear in results
+- Total queries: 970 (940 grid + 30 airports), runtime ~32 minutes
 
 ### Implementation Plan (12 tasks total)
 
@@ -291,7 +300,9 @@ See epic `faa-crane-viewer-pvk` for full task breakdown:
 - Analyze response format
 
 **Phase 2: Backend Data Collection (P1)**
-- Create fetcher script with grid search (~1500 points, 100 NM spacing)
+- Create fetcher script with hybrid search approach
+  - Geographic grid: 940 points at 75 NM spacing
+  - Airport supplemental: 30 major airports by ICAO
 - Implement filtering logic
 - Convert to CSV format
 - Integrate into update pipeline
@@ -310,18 +321,19 @@ See epic `faa-crane-viewer-pvk` for full task breakdown:
 ### Technical Considerations
 
 **Rate Limiting:**
-- ~1500 API calls for full US coverage
-- Need delays between requests (1-2 seconds)
+- 970 API calls for full coverage (940 grid + 30 airports)
+- 2-second delays between requests
 - Exponential backoff on errors
-- Total runtime: ~30-60 minutes
+- Total runtime: ~32 minutes for NOTAMs
 
 **CORS Issues:**
 - Mitigated by Python script approach (not browser-based)
 - Backend fetches data, saves as static CSV
 
 **Data Deduplication:**
-- Grid search may return same NOTAM multiple times
-- Deduplicate by NOTAM ID before saving
+- Hybrid search returns overlapping results
+- Deduplicate by NOTAM number before saving
+- Prevents duplicates from grid and airport searches
 
 **Date Handling:**
 - NOTAM dates often in format: YYMMDDHHmm (e.g., 2511112359)
@@ -329,9 +341,17 @@ See epic `faa-crane-viewer-pvk` for full task breakdown:
 - Times are in UTC
 
 **Performance:**
-- Expected NOTAM count: 500-2000 active crane NOTAMs
-- Total dataset will be ~80K records (39K DOF + 38K Part77 + 1-2K NOTAM)
-- May need marker clustering if too slow
+- Actual NOTAM count: Typically 10-50 active crane NOTAMs
+- Lower than expected due to FAA API limitations
+- Some NOTAMs visible on web interface don't appear in API results
+- Total dataset: ~39K records (39K DOF+Part77 + 10-50 NOTAM)
+- Frontend performance: < 5s load time achieved
+
+**Known API Limitations:**
+- FAA NOTAM Search API occasionally doesn't return certain NOTAMs
+- Both geographic and ICAO searches can miss specific NOTAMs
+- Example: NOTAM 10/123 (KPHX crane) visible on web but not in API
+- Hybrid search strategy helps but cannot guarantee 100% capture
 
 ---
 
