@@ -170,7 +170,7 @@ is_active = start_datetime <= current_date <= end_datetime
 ```
 
 **Test vs Production Mode:**
-To switch between test grid (4 points, ~2 minutes) and production grid (940 points + 30 airports, ~32 minutes):
+To switch between test grid (4 points, ~2 minutes) and production grid (940 points + 805 airports, ~58 minutes):
 
 ```python
 # update_faa_data.py line 896
@@ -188,13 +188,11 @@ grid_points = generate_notam_grid(spacing_nm=75)  # Current: 75 NM (940 points)
 ```
 
 **Airport Search:**
-The list of major airports is defined in `get_major_airports()` (line 438). To modify:
-
-```python
-# Add or remove airports from the list
-# Format: ('ICAO_CODE', latitude, longitude)
-('KPHX', 33.4373, -112.0078),  # Phoenix Sky Harbor
-```
+The airport list is dynamically fetched from OurAirports database in `get_major_airports()` (line 438):
+- Downloads from https://davidmegginson.github.io/ourairports-data/airports.csv
+- Filters for US medium and large airports (805 total)
+- GPS codes starting with 'K' (continental US)
+- Falls back to hardcoded list of 30 major airports if download fails
 
 ### JavaScript Script (`merge-faa-data.js`)
 To adjust crane detection in the merge script, modify the `isCraneRelated` function around line 156:
@@ -218,7 +216,7 @@ const craneKeywords = ['CRANE', 'TOWER', 'MOBILE CRANE', 'CONSTRUCTION CRANE', '
 - Check console output for "Crane-related NOTAMs: X" message
 
 **NOTAM fetch timeout:**
-- Production search takes ~32 minutes (940 grid points + 30 airports with 2-second delays)
+- Production search takes ~58 minutes (940 grid points + 805 airports with 2-second delays)
 - GitHub Actions has 60-minute timeout configured
 - For faster testing, set `use_test_grid = True` (reduces to 4 points)
 

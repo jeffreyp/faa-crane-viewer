@@ -283,12 +283,13 @@ Add **NOTAMs (Notices to Airmen)** as a third data source for crane-related temp
 10. pvk.11 - End-to-end testing and validation ✅
 11. pvk.12 - Documentation updates for all three sources ✅
 
-**Coverage Improvements (2025-11-12):**
-After investigating missing NOTAM 10/123 (KPHX crane), implemented enhanced search:
-- Increased grid density: 100 NM → 75 NM spacing (+79% more points)
-- Added airport-based searches to supplement geographic queries
-- Addresses FAA API limitations where some NOTAMs don't appear in results
-- Total queries: 970 (940 grid + 30 airports), runtime ~32 minutes
+**Coverage Improvements:**
+- **2025-11-12:** Increased grid density: 100 NM → 75 NM spacing (+79% more points)
+- **2025-11-12:** Added airport-based searches (30 hardcoded major airports)
+- **2025-11-13:** Expanded to all 805 US medium/large airports using OurAirports database
+  - Dynamically fetches airport list (updated nightly)
+  - Addresses FAA API limitations where some NOTAMs don't appear in results
+  - Total queries: 1,745 (940 grid + 805 airports), runtime ~58 minutes
 
 ### Implementation Plan (12 tasks total)
 
@@ -302,7 +303,10 @@ See epic `faa-crane-viewer-pvk` for full task breakdown:
 **Phase 2: Backend Data Collection (P1)**
 - Create fetcher script with hybrid search approach
   - Geographic grid: 940 points at 75 NM spacing
-  - Airport supplemental: 30 major airports by ICAO
+  - Airport supplemental: 805 US medium/large airports from OurAirports
+    - Dynamically downloaded from public domain database
+    - Filters for iso_country='US', type IN ('medium_airport', 'large_airport')
+    - GPS codes starting with 'K' (continental US ICAO codes)
 - Implement filtering logic
 - Convert to CSV format
 - Integrate into update pipeline
@@ -321,10 +325,10 @@ See epic `faa-crane-viewer-pvk` for full task breakdown:
 ### Technical Considerations
 
 **Rate Limiting:**
-- 970 API calls for full coverage (940 grid + 30 airports)
+- 1,745 API calls for full coverage (940 grid + 805 airports)
 - 2-second delays between requests
 - Exponential backoff on errors
-- Total runtime: ~32 minutes for NOTAMs
+- Total runtime: ~58 minutes for NOTAMs (within 60-minute GitHub Actions timeout)
 
 **CORS Issues:**
 - Mitigated by Python script approach (not browser-based)

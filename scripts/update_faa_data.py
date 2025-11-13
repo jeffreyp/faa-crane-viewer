@@ -437,43 +437,82 @@ def generate_notam_grid(spacing_nm: float = 100) -> List[Tuple[float, float]]:
 
 def get_major_airports() -> List[Tuple[str, float, float]]:
     """
-    Get list of major US airports to supplement geographic grid search.
+    Dynamically fetch all US medium and large airports from OurAirports database.
     Returns list of (ICAO_code, latitude, longitude) tuples.
+
+    Downloads the latest airport data from OurAirports (public domain, updated nightly)
+    and filters for US airports with:
+    - Type: medium_airport or large_airport
+    - GPS code: Starts with 'K' (continental US ICAO codes)
+
+    This provides comprehensive coverage of ~805 airports to supplement the geographic
+    grid search and capture NOTAMs that might not appear in radius searches.
     """
-    # Top 50 busiest US airports by location - these are most likely to have
-    # nearby construction/crane activity that could be missed by grid search
-    return [
-        ('KATL', 33.6407, -84.4277),   # Atlanta
-        ('KORD', 41.9742, -87.9073),   # Chicago O'Hare
-        ('KDFW', 32.8998, -97.0403),   # Dallas/Fort Worth
-        ('KDEN', 39.8561, -104.6737),  # Denver
-        ('KLAX', 33.9416, -118.4085),  # Los Angeles
-        ('KSFO', 37.6213, -122.3790),  # San Francisco
-        ('KLAS', 36.0840, -115.1537),  # Las Vegas
-        ('KPHX', 33.4373, -112.0078),  # Phoenix
-        ('KIAH', 29.9902, -95.3368),   # Houston
-        ('KMIA', 25.7959, -80.2870),   # Miami
-        ('KJFK', 40.6413, -73.7781),   # New York JFK
-        ('KEWR', 40.6895, -74.1745),   # Newark
-        ('KMCO', 28.4312, -81.3081),   # Orlando
-        ('KSEA', 47.4502, -122.3088),  # Seattle
-        ('KBOS', 42.3656, -71.0096),   # Boston
-        ('KPHL', 39.8744, -75.2424),   # Philadelphia
-        ('KDTW', 42.2162, -83.3554),   # Detroit
-        ('KMSN', 43.1399, -89.3375),   # Minneapolis
-        ('KSLC', 40.7899, -111.9791),  # Salt Lake City
-        ('KBWI', 39.1774, -76.6684),   # Baltimore
-        ('KTPA', 27.9755, -82.5332),   # Tampa
-        ('KPDX', 45.5898, -122.5951),  # Portland
-        ('KSAN', 32.7336, -117.1897),  # San Diego
-        ('KSTL', 38.7499, -90.3700),   # St. Louis
-        ('KCLT', 35.2144, -80.9473),   # Charlotte
-        ('KAUS', 30.1945, -97.6699),   # Austin
-        ('KBNA', 36.1245, -86.6782),   # Nashville
-        ('KOAK', 37.7126, -122.2197),  # Oakland
-        ('KSAT', 29.5337, -98.4698),   # San Antonio
-        ('KSNA', 33.6762, -117.8681),  # Orange County
-    ]
+    try:
+        print("Downloading OurAirports database...")
+        url = "https://davidmegginson.github.io/ourairports-data/airports.csv"
+        response = requests.get(url, timeout=30)
+        response.raise_for_status()
+
+        # Parse CSV
+        df = pd.read_csv(io.StringIO(response.text))
+        print(f"Loaded {len(df)} airports from OurAirports database")
+
+        # Filter for US medium and large airports with K prefix ICAO codes
+        filtered = df[
+            (df['iso_country'] == 'US') &
+            (df['type'].isin(['medium_airport', 'large_airport'])) &
+            (df['gps_code'].notna()) &
+            (df['gps_code'].str.startswith('K', na=False))
+        ]
+
+        print(f"Filtered to {len(filtered)} US medium/large airports")
+
+        # Convert to list of tuples (ICAO, lat, lon)
+        airports = [
+            (row['gps_code'], row['latitude_deg'], row['longitude_deg'])
+            for _, row in filtered.iterrows()
+        ]
+
+        print(f"Returning {len(airports)} airports for NOTAM search")
+        return airports
+
+    except Exception as e:
+        print(f"Error fetching OurAirports data: {e}")
+        print("Falling back to hardcoded major airports...")
+        # Fallback to a minimal set of major airports if download fails
+        return [
+            ('KATL', 33.6407, -84.4277),   # Atlanta
+            ('KORD', 41.9742, -87.9073),   # Chicago O'Hare
+            ('KDFW', 32.8998, -97.0403),   # Dallas/Fort Worth
+            ('KDEN', 39.8561, -104.6737),  # Denver
+            ('KLAX', 33.9416, -118.4085),  # Los Angeles
+            ('KSFO', 37.6213, -122.3790),  # San Francisco
+            ('KLAS', 36.0840, -115.1537),  # Las Vegas
+            ('KPHX', 33.4373, -112.0078),  # Phoenix
+            ('KIAH', 29.9902, -95.3368),   # Houston
+            ('KMIA', 25.7959, -80.2870),   # Miami
+            ('KJFK', 40.6413, -73.7781),   # New York JFK
+            ('KEWR', 40.6895, -74.1745),   # Newark
+            ('KMCO', 28.4312, -81.3081),   # Orlando
+            ('KSEA', 47.4502, -122.3088),  # Seattle
+            ('KBOS', 42.3656, -71.0096),   # Boston
+            ('KPHL', 39.8744, -75.2424),   # Philadelphia
+            ('KDTW', 42.2162, -83.3554),   # Detroit
+            ('KMSN', 43.1399, -89.3375),   # Minneapolis
+            ('KSLC', 40.7899, -111.9791),  # Salt Lake City
+            ('KBWI', 39.1774, -76.6684),   # Baltimore
+            ('KTPA', 27.9755, -82.5332),   # Tampa
+            ('KPDX', 45.5898, -122.5951),  # Portland
+            ('KSAN', 32.7336, -117.1897),  # San Diego
+            ('KSTL', 38.7499, -90.3700),   # St. Louis
+            ('KCLT', 35.2144, -80.9473),   # Charlotte
+            ('KAUS', 30.1945, -97.6699),   # Austin
+            ('KBNA', 36.1245, -86.6782),   # Nashville
+            ('KOAK', 37.7126, -122.2197),  # Oakland
+            ('KSAT', 29.5337, -98.4698),   # San Antonio
+            ('KSNA', 33.6762, -117.8681),  # Orange County
+        ]
 
 def fetch_notams_for_airport(icao_code: str) -> Optional[Dict]:
     """
@@ -917,11 +956,11 @@ def fetch_and_process_notams(use_test_grid: bool = False) -> Optional[pd.DataFra
         print(f"Grid search complete in {elapsed_time/60:.1f} minutes")
         print(f"NOTAMs from grid search: {len(all_notams)}")
 
-        # Supplement with major airport searches for better coverage
+        # Supplement with airport searches for better coverage
         if not use_test_grid:
-            print("\n=== Supplementing with Major Airport Searches ===")
+            print("\n=== Supplementing with Airport Searches ===")
             airports = get_major_airports()
-            print(f"Querying {len(airports)} major airports...")
+            print(f"Querying {len(airports)} US medium/large airports...")
 
             airport_start = time.time()
             for i, (icao, lat, lon) in enumerate(airports, 1):
