@@ -2,7 +2,6 @@
 
 ![DOF Data](https://img.shields.io/badge/DOF-Daily%20Updates-blue?logo=data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCI+PHBhdGggZmlsbD0id2hpdGUiIGQ9Ik0xMiAyQzYuNDggMiAyIDYuNDggMiAxMnM0LjQ4IDEwIDEwIDEwIDEwLTQuNDggMTAtMTBTMTcuNTIgMiAxMiAyem0tMiAxNWwtNS01IDEuNDEtMS40MUwxMCAxNC4xN2w3LjU5LTcuNTlMMTkgOGwtOSA5eiIvPjwvc3ZnPg==)
 ![OEAAA Data](https://img.shields.io/badge/OEAAA-Daily%20Updates-green?logo=data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCI+PHBhdGggZmlsbD0id2hpdGUiIGQ9Ik0xMiAyQzYuNDggMiAyIDYuNDggMiAxMnM0LjQ4IDEwIDEwIDEwIDEwLTQuNDggMTAtMTBTMTcuNTIgMiAxMiAyem0tMiAxNWwtNS01IDEuNDEtMS40MUwxMCAxNC4xN2w3LjU5LTcuNTlMMTkgOGwtOSA5eiIvPjwvc3ZnPg==)
-![NOTAM Data](https://img.shields.io/badge/NOTAM-Daily%20Updates-orange?logo=data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCI+PHBhdGggZmlsbD0id2hpdGUiIGQ9Ik0xMiAyQzYuNDggMiAyIDYuNDggMiAxMnM0LjQ4IDEwIDEwIDEwIDEwLTQuNDggMTAtMTBTMTcuNTIgMiAxMiAyem0tMiAxNWwtNS01IDEuNDEtMS40MUwxMCAxNC4xN2w3LjU5LTcuNTlMMTkgOGwtOSA5eiIvPjwvc3ZnPg==)
 
 An entirely vibe-coded web application that displays construction cranes within a user-specified nautical mile radius of a US address/location.
 
@@ -73,15 +72,9 @@ The FAA obstacle data is automatically updated daily at 6 AM UTC via GitHub Acti
 
 - Downloads the latest DOF (Digital Obstacle File) data from FAA
 - Downloads Part 77 regional data from all 9 FAA regions
-- Fetches current NOTAMs via hybrid search strategy:
-  - Geographic grid search (940 points, 75 NM spacing covering CONUS)
-  - Supplemental search of 30 major US airports by ICAO code
-- Filters for crane-related obstructions (class=obstruction, condition contains "CRANE")
-- Processes and merges data from all three sources
+- Processes and merges data from both sources
 - Commits updated data and redeploys to GitHub Pages
-
-**Note:** The full update process takes approximately 35-40 minutes due to NOTAM search coverage and rate limiting.
-
+- 
 ### Monitoring Updates
 
 The status badge at the top of this README shows whether the automated updates are working:
@@ -126,27 +119,10 @@ Part 77 data includes structures that have been evaluated for their aeronautical
 
 **Source:** FAA NOTAM Search API
 **URL:** https://notams.aim.faa.gov/notamSearch/
-**Update Frequency:** Daily
 **Coverage:** Continental USA via hybrid search strategy
 **Records:** Varies (typically 10-50 active crane-related temporary obstructions)
 
 NOTAMs provide real-time information about temporary crane obstructions. The application uses a dual-search strategy for comprehensive coverage:
-
-**Geographic Grid Search:**
-- 940 grid points at 75 NM spacing
-- 100 NM search radius per point
-- Complete CONUS coverage with redundancy
-
-**Airport Supplemental Search:**
-- 30 major US airports (KATL, KORD, KDFW, KDEN, KLAX, KSFO, KPHX, etc.)
-- Searches by ICAO code with 100 NM radius
-- Targets high-activity areas most likely to have crane operations
-
-**Filtering Criteria:**
-- Class: Obstruction
-- Condition: Contains "CRANE" keyword
-- Date: Currently active (within start/end dates)
-- Deduplication by NOTAM number across all searches
 
 **NOTAM Display Features:**
 - Orange pulsing triangle marker (distinct from blue crane icons)
@@ -156,7 +132,7 @@ NOTAMs provide real-time information about temporary crane obstructions. The app
 
 ### Data Processing
 
-All three sources are:
+Sources are:
 - Converted to a standardized CSV format
 - Filtered for crane-related keywords (CRANE, MOBILE, EQUIPMENT, VEHICLE)
 - Deduplicated by aeronautical study number (ASN)
@@ -171,11 +147,6 @@ All three sources are:
 - Crane NOTAMs are relatively rare (typically 10-50 active at any time)
 - Check browser console for "Loaded X NOTAM cranes" message
 - Verify `public/data/notams.csv` exists and contains data
-
-**Known NOTAM API Limitations:**
-- The FAA NOTAM Search API occasionally doesn't return certain NOTAMs via programmatic queries
-- Some NOTAMs visible on the FAA web interface may not appear in API responses
-- The hybrid search strategy (grid + airports) helps mitigate this issue but cannot guarantee 100% capture
 
 **Missing data from a specific region?**
 - Part 77 regional servers occasionally timeout
