@@ -151,7 +151,80 @@ const decimalToDMS = (decimal) => {
 };
 
 /**
- * Fetch NOTAMs from the Cloudflare Worker proxy
+ * Fetch a single page of NOTAMs from the Cloudflare Worker proxy
+ * @param {number} lat - Latitude in decimal degrees
+ * @param {number} lng - Longitude in decimal degrees
+ * @param {number} radiusNM - Search radius in nautical miles
+ * @param {number} offset - Pagination offset
+ * @returns {Promise<Object>} NOTAM API response
+ */
+const fetchNOTAMPage = async (lat, lng, radiusNM, offset = 0) => {
+  // Convert coordinates to DMS format
+  const latDMS = decimalToDMS(lat);
+  const lngDMS = decimalToDMS(lng);
+
+  // Build form data matching FAA NOTAM API format
+  const formData = new URLSearchParams({
+    'searchType': '3', // Geographic search
+    'designatorsForLocation': '',
+    'designatorForAccountable': '',
+    'latDegrees': latDMS.degrees,
+    'latMinutes': latDMS.minutes,
+    'latSeconds': latDMS.seconds,
+    'longDegrees': lngDMS.degrees,
+    'longMinutes': lngDMS.minutes,
+    'longSeconds': lngDMS.seconds,
+    'radius': Math.min(radiusNM, NOTAM_CONFIG.maxRadius).toString(),
+    'sortColumns': '5 false',
+    'sortDirection': 'true',
+    'designatorForNotamNumberSearch': '',
+    'notamNumber': '',
+    'radiusSearchOnDesignator': 'false',
+    'radiusSearchDesignator': '',
+    'latitudeDirection': lat >= 0 ? 'N' : 'S',
+    'longitudeDirection': lng >= 0 ? 'E' : 'W',
+    'freeFormText': '',
+    'flightPathText': '',
+    'flightPathDivertAirfields': '',
+    'flightPathBuffer': '4',
+    'flightPathIncludeNavaids': 'true',
+    'flightPathIncludeArtcc': 'false',
+    'flightPathIncludeTfr': 'true',
+    'flightPathIncludeRegulatory': 'false',
+    'flightPathResultsType': 'All NOTAMs',
+    'archiveDate': '',
+    'archiveDesignator': '',
+    'offset': offset.toString(),
+    'notamsOnly': 'false',
+    'filters': '',
+    'recaptchaToken': ''
+  });
+
+  // Fetch from Cloudflare Worker with timeout
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), NOTAM_CONFIG.timeout);
+
+  const response = await fetch(NOTAM_PROXY_URL, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/x-www-form-urlencoded; charset=utf-8',
+      'Accept': 'application/json'
+    },
+    body: formData.toString(),
+    signal: controller.signal
+  });
+
+  clearTimeout(timeoutId);
+
+  if (!response.ok) {
+    throw new Error(`NOTAM proxy returned ${response.status}`);
+  }
+
+  return await response.json();
+};
+
+/**
+ * Fetch NOTAMs from the Cloudflare Worker proxy with pagination support
  * @param {number} lat - Latitude in decimal degrees
  * @param {number} lng - Longitude in decimal degrees
  * @param {number} radiusNM - Search radius in nautical miles
@@ -167,72 +240,44 @@ export const fetchNOTAMs = async (lat, lng, radiusNM) => {
   try {
     console.log(`Fetching NOTAMs from proxy for location: ${lat}, ${lng}, radius: ${radiusNM}nm`);
 
-    // Convert coordinates to DMS format
-    const latDMS = decimalToDMS(lat);
-    const lngDMS = decimalToDMS(lng);
+    let allNotams = [];
+    let offset = 0;
+    const pageSize = 30; // FAA API returns 30 results per page
+    let hasMore = true;
 
-    // Build form data matching FAA NOTAM API format
-    const formData = new URLSearchParams({
-      'searchType': '3', // Geographic search
-      'designatorsForLocation': '',
-      'designatorForAccountable': '',
-      'latDegrees': latDMS.degrees,
-      'latMinutes': latDMS.minutes,
-      'latSeconds': latDMS.seconds,
-      'longDegrees': lngDMS.degrees,
-      'longMinutes': lngDMS.minutes,
-      'longSeconds': lngDMS.seconds,
-      'radius': Math.min(radiusNM, NOTAM_CONFIG.maxRadius).toString(),
-      'sortColumns': '5 false',
-      'sortDirection': 'true',
-      'designatorForNotamNumberSearch': '',
-      'notamNumber': '',
-      'radiusSearchOnDesignator': 'false',
-      'radiusSearchDesignator': '',
-      'latitudeDirection': lat >= 0 ? 'N' : 'S',
-      'longitudeDirection': lng >= 0 ? 'E' : 'W',
-      'freeFormText': '',
-      'flightPathText': '',
-      'flightPathDivertAirfields': '',
-      'flightPathBuffer': '4',
-      'flightPathIncludeNavaids': 'true',
-      'flightPathIncludeArtcc': 'false',
-      'flightPathIncludeTfr': 'true',
-      'flightPathIncludeRegulatory': 'false',
-      'flightPathResultsType': 'All NOTAMs',
-      'archiveDate': '',
-      'archiveDesignator': '',
-      'offset': '0',
-      'notamsOnly': 'false',
-      'filters': '',
-      'recaptchaToken': ''
-    });
+    // Fetch all pages of NOTAM results
+    while (hasMore) {
+      const data = await fetchNOTAMPage(lat, lng, radiusNM, offset);
 
-    // Fetch from Cloudflare Worker with timeout
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), NOTAM_CONFIG.timeout);
+      const notamCount = data.notamList?.length || 0;
+      console.log(`Received ${notamCount} NOTAMs from API (offset: ${offset})`);
 
-    const response = await fetch(NOTAM_PROXY_URL, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/x-www-form-urlencoded; charset=utf-8',
-        'Accept': 'application/json'
-      },
-      body: formData.toString(),
-      signal: controller.signal
-    });
+      if (notamCount === 0) {
+        // No more results
+        hasMore = false;
+      } else {
+        allNotams.push(...(data.notamList || []));
 
-    clearTimeout(timeoutId);
+        // Check if there might be more results
+        // If we got a full page, there might be more
+        if (notamCount < pageSize) {
+          hasMore = false;
+        } else {
+          offset += pageSize;
 
-    if (!response.ok) {
-      throw new Error(`NOTAM proxy returned ${response.status}`);
+          // Safety limit: don't fetch more than 300 NOTAMs (10 pages)
+          if (offset >= 300) {
+            console.warn(`Reached safety limit of 300 NOTAMs, stopping pagination`);
+            hasMore = false;
+          }
+        }
+      }
     }
 
-    const data = await response.json();
-    console.log(`Received ${data.notamList?.length || 0} NOTAMs from API`);
+    console.log(`Total NOTAMs fetched: ${allNotams.length}`);
 
     // Parse and filter NOTAMs for crane-related obstructions
-    return parseNOTAMResponse(data);
+    return parseNOTAMResponse({ notamList: allNotams });
 
   } catch (error) {
     console.error('Error fetching NOTAMs:', error);
