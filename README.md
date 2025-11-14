@@ -73,11 +73,6 @@ The static FAA obstacle data (DOF and Part 77) is automatically updated daily at
 
 - Downloads the latest DOF (Digital Obstacle File) data from FAA
 - Downloads Part 77 regional data from all 9 FAA regions
-<<<<<<< HEAD
-- Processes and merges data from both sources
-- Commits updated data and redeploys to GitHub Pages
-- 
-=======
 - Filters for crane-related obstructions
 - Processes and merges data from both sources
 - Commits updated data and redeploys to GitHub Pages
@@ -85,8 +80,6 @@ The static FAA obstacle data (DOF and Part 77) is automatically updated daily at
 **NOTAMs** are fetched on-demand when users search, providing real-time data without batch processing delays.
 
 **Note:** The static data update process takes approximately 2-3 minutes.
-
->>>>>>> e306d50 (Update documentation to reflect completed NOTAM integration)
 ### Monitoring Updates
 
 The status badge at the top of this README shows whether the automated updates are working:
@@ -131,19 +124,12 @@ Part 77 data includes structures that have been evaluated for their aeronautical
 
 **Source:** FAA NOTAM Search API
 **URL:** https://notams.aim.faa.gov/notamSearch/
-<<<<<<< HEAD
-**Coverage:** Continental USA via hybrid search strategy
-**Records:** Varies (typically 10-50 active crane-related temporary obstructions)
-=======
 **Update Frequency:** Real-time (fetched on-demand during user searches)
 **Coverage:** User's search area
 **Records:** Varies (typically 10-50 active crane-related temporary obstructions nationwide)
->>>>>>> e306d50 (Update documentation to reflect completed NOTAM integration)
 
 NOTAMs provide real-time information about temporary crane obstructions. The application uses an **on-demand architecture**:
 
-<<<<<<< HEAD
-=======
 **On-Demand Fetching:**
 - Fetched when user performs a search
 - Proxied through Cloudflare Worker (CORS bypass)
@@ -155,8 +141,6 @@ NOTAMs provide real-time information about temporary crane obstructions. The app
 - Condition: Contains "CRANE" keyword (server-side filtering)
 - Location: Within user's search radius
 - Date: Currently active (within start/end dates)
-
->>>>>>> e306d50 (Update documentation to reflect completed NOTAM integration)
 **NOTAM Display Features:**
 - Orange pulsing triangle marker (distinct from blue crane icons)
 - Warning banner in popup showing "Temporary Obstruction"
@@ -165,11 +149,7 @@ NOTAMs provide real-time information about temporary crane obstructions. The app
 
 ### Data Processing
 
-<<<<<<< HEAD
-Sources are:
-=======
 **Static sources (DOF and Part 77):**
->>>>>>> e306d50 (Update documentation to reflect completed NOTAM integration)
 - Converted to a standardized CSV format
 - Filtered for crane-related keywords (CRANE, MOBILE, EQUIPMENT, VEHICLE)
 - Deduplicated by aeronautical study number (ASN)
@@ -190,14 +170,10 @@ Sources are:
 - Verify `NOTAM_PROXY_URL` is configured in `src/config.js`
 - Ensure Cloudflare Worker is deployed and accessible
 
-<<<<<<< HEAD
-=======
 **Known NOTAM API Limitations:**
 - The FAA NOTAM Search API may not return all NOTAMs visible on the web interface
 - API responses are sometimes incomplete or delayed
 - On-demand fetching ensures you get the most current data available
-
->>>>>>> e306d50 (Update documentation to reflect completed NOTAM integration)
 **Missing data from a specific region?**
 - Part 77 regional servers occasionally timeout
 - The update script continues with available regions
