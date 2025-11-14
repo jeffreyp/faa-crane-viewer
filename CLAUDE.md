@@ -231,11 +231,14 @@ Display on MapView (Leaflet markers) + TableView (sortable table)
 ### Setup
 
 **Tool:** Beads (bd) CLI
-**Location:** `/home/ubuntu/.local/bin/bd`
+**Location:**
+  - macOS: `/usr/local/bin/bd`
+  - Ubuntu: `/home/ubuntu/.local/bin/bd`
+  - Or via MCP server (accessible in Claude Code)
 **Database:** `.beads/beads.db`
-**JSONL:** `.beads/beads.jsonl` (git-tracked)
+**JSONL:** `.beads/beads.base.jsonl` (git-tracked)
 **Issue Prefix:** `faa-crane-viewer`
-**Issue Format:** `faa-crane-viewer-{id}` (e.g., `faa-crane-viewer-pvk`)
+**Issue Format:** `faa-crane-viewer-{id}`
 
 ### Git Integration
 
@@ -270,9 +273,9 @@ bd stats
 
 ### Issue Hierarchy
 
-- **Epic:** `faa-crane-viewer-pvk` - Add NOTAMs as third data source
-  - **Child tasks:** Use `--parent faa-crane-viewer-pvk` when creating
-  - **Naming:** Children are auto-numbered (e.g., `faa-crane-viewer-pvk.1`, `.2`, etc.)
+- Issues can have parent-child relationships for organizing work
+- Use `--parent <parent-id>` when creating child tasks
+- Children are auto-numbered (e.g., `faa-crane-viewer-abc.1`, `.2`, etc.)
 
 ### Priority Levels
 
@@ -505,27 +508,19 @@ origin  https://github.com/jeffreyp/faa-crane-viewer.git
 
 1. **Check project status:**
    ```bash
-   cd /mnt/workplace/faa-crane-viewer
    git status
-   bd list --status open
+   bd list --status open  # Check for any open issues
    ```
 
-2. **See current work:**
-   ```bash
-   bd show faa-crane-viewer-pvk  # Show epic and all sub-tasks
-   bd ready                       # Show tasks ready to work on
-   ```
-
-3. **Resume investigation:**
-   - Review `scripts/investigate_notam_api.py`
-   - Check if manual browser investigation was completed
-   - Look for any new findings in issue notes
-
-4. **Test environment:**
+2. **Test environment:**
    ```bash
    npm start                      # Start dev server
    python3 scripts/update_faa_data.py  # Test data update
    ```
+
+3. **Deploy Cloudflare Worker (if needed):**
+   - See `cloudflare-worker/DEPLOYMENT.md`
+   - Update `src/config.js` with worker URL
 
 ---
 
@@ -560,14 +555,17 @@ origin  https://github.com/jeffreyp/faa-crane-viewer.git
 
 **Symptom:** `bd` command not found or MCP errors
 **Check:**
-- `which bd` should return `/home/ubuntu/.local/bin/bd`
+- `which bd` should return a valid path:
+  - macOS: `/usr/local/bin/bd`
+  - Ubuntu: `/home/ubuntu/.local/bin/bd`
 - `.beads/beads.db` exists
+- `.beads/beads.base.jsonl` exists and is valid JSON Lines
 - MCP server may need Claude Code restart
 
 **Common fixes:**
 - Restart Claude Code to reload MCP servers
-- Use `bd` via Bash tool directly if MCP fails
-- Check `BEADS_PATH` environment variable
+- Use Bash tool with `bd` command directly if MCP fails
+- Verify beads is initialized: `bd list`
 
 ---
 
@@ -576,10 +574,9 @@ origin  https://github.com/jeffreyp/faa-crane-viewer.git
 When resuming work on this project:
 
 1. **Read this file first** to understand project structure
-2. **Check beads status** with `bd list` and `bd show faa-crane-viewer-pvk`
+2. **Check beads status** with `bd list` and `bd ready`
 3. **Review recent commits** with `git log --oneline -10`
 4. **Check what's in progress** - look for issues marked `in_progress`
-5. **Reference the comprehensive plan** in the conversation history for NOTAM integration details
 
 **Do not:**
 - Create new files unless absolutely necessary
@@ -609,7 +606,7 @@ This tool helps users find cranes and construction equipment near their location
 
 ---
 
-*Last Updated: 2025-11-12*
-*Current Epic: NOTAM Integration (faa-crane-viewer-pvk)*
-*Current Status: Implementation complete, documentation in progress*
-*Branch: feature/notam-integration (ready for PR to main)*
+*Last Updated: 2025-11-13*
+*Current Status: NOTAM Integration complete and deployed*
+*Branch: main (feature merged)*
+*Live URL: https://jeffreyp.github.io/faa-crane-viewer*
