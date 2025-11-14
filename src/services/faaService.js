@@ -286,6 +286,45 @@ export const fetchNOTAMs = async (lat, lng, radiusNM) => {
 };
 
 /**
+ * Parse FAA NOTAM date format (MM/DD/YYYY HHMM) to JavaScript Date object
+ * Example: "11/19/2024 1400" -> Date object
+ * @param {string} dateStr - Date string in FAA NOTAM format
+ * @returns {Date|null} Parsed Date object or null if invalid
+ */
+const parseNOTAMDate = (dateStr) => {
+  if (!dateStr || typeof dateStr !== 'string') {
+    return null;
+  }
+
+  // FAA NOTAM format: "MM/DD/YYYY HHMM"
+  // Example: "11/19/2024 1400"
+  const match = dateStr.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})\s+(\d{2})(\d{2})$/);
+
+  if (!match) {
+    return null;
+  }
+
+  const [, month, day, year, hours, minutes] = match;
+
+  // Create date in UTC to avoid timezone issues
+  // Note: month is 0-indexed in JavaScript Date constructor
+  const date = new Date(Date.UTC(
+    parseInt(year),
+    parseInt(month) - 1,  // Convert to 0-indexed month
+    parseInt(day),
+    parseInt(hours),
+    parseInt(minutes)
+  ));
+
+  // Validate the date is valid
+  if (isNaN(date.getTime())) {
+    return null;
+  }
+
+  return date;
+};
+
+/**
  * Parse NOTAM API response and extract crane-related obstructions
  * @param {Object} data - NOTAM API response
  * @returns {Array} Array of crane objects in standard format
@@ -311,8 +350,9 @@ const parseNOTAMResponse = (data) => {
     }
 
     // Filter for currently active NOTAMs based on start/end dates
-    const startDate = notam.startDate ? new Date(notam.startDate) : null;
-    const endDate = notam.endDate ? new Date(notam.endDate) : null;
+    // Use custom parser for FAA NOTAM date format
+    const startDate = notam.startDate ? parseNOTAMDate(notam.startDate) : null;
+    const endDate = notam.endDate ? parseNOTAMDate(notam.endDate) : null;
 
     // If we have a start date and it's in the future, skip this NOTAM
     if (startDate && startDate > now) {
