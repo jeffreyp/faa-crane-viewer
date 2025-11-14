@@ -251,14 +251,13 @@ const parseNOTAMResponse = (data) => {
   }
 
   const craneNotams = data.notamList.filter(notam => {
-    // Filter for obstruction class
-    const isObstruction = notam.classification === 'Airspace' &&
-                          (notam.obstacleClass === 'obstruction' ||
-                           notam.type === 'obstruction');
+    // Filter for obstruction feature
+    const isObstruction = notam.keyword === 'OBST' ||
+                          notam.featureName === 'Obstruction';
 
-    // Filter for crane-related
-    const condition = notam.condition || '';
-    const isCrane = condition.toLowerCase().includes('crane');
+    // Filter for crane-related in the traditional message
+    const message = notam.traditionalMessageFrom4thWord || '';
+    const isCrane = message.toLowerCase().includes('crane');
 
     return isObstruction && isCrane;
   });
@@ -267,19 +266,45 @@ const parseNOTAMResponse = (data) => {
 
   // Transform to standard format
   return craneNotams.map(notam => {
-    // Parse coordinates from NOTAM
-    const lat = parseFloat(notam.coordinates?.latitude || 0);
-    const lng = parseFloat(notam.coordinates?.longitude || 0);
+    // Parse coordinates from traditionalMessageFrom4thWord
+    // Format example: "OBST CRANE (ASN UNKNOWN) 474523N1221521W (0.4NM SE S60) UNKNOWN (230FT AGL)"
+    const message = notam.traditionalMessageFrom4thWord || '';
 
-    // Parse height (might be in feet or meters)
-    const height = parseInt(notam.obstacleHeight || notam.maxAltitude || '0');
+    // Extract coordinates using regex (format: DDMMSSN/SDDDMMSSW/E)
+    const coordMatch = message.match(/(\d{6}[NS])(\d{7}[EW])/);
+    let lat = 0;
+    let lng = 0;
+
+    if (coordMatch) {
+      // Parse latitude (DDMMSSN/S)
+      const latStr = coordMatch[1];
+      const latDeg = parseInt(latStr.substring(0, 2));
+      const latMin = parseInt(latStr.substring(2, 4));
+      const latSec = parseInt(latStr.substring(4, 6));
+      const latDir = latStr.substring(6);
+      lat = latDeg + latMin/60 + latSec/3600;
+      if (latDir === 'S') lat = -lat;
+
+      // Parse longitude (DDDMMSSW/E)
+      const lngStr = coordMatch[2];
+      const lngDeg = parseInt(lngStr.substring(0, 3));
+      const lngMin = parseInt(lngStr.substring(3, 5));
+      const lngSec = parseInt(lngStr.substring(5, 7));
+      const lngDir = lngStr.substring(7);
+      lng = lngDeg + lngMin/60 + lngSec/3600;
+      if (lngDir === 'W') lng = -lng;
+    }
+
+    // Parse height (extract from "XXX FT AGL" or "(XXXFT AGL)")
+    const heightMatch = message.match(/\((\d+)FT AGL\)|(\d+)FT AGL/i);
+    const height = heightMatch ? parseInt(heightMatch[1] || heightMatch[2]) : 0;
 
     // Parse dates
-    const startDate = notam.startDate || notam.effectiveStart || '';
-    const endDate = notam.endDate || notam.effectiveEnd || 'UNKNOWN';
+    const startDate = notam.startDate || '';
+    const endDate = notam.endDate || 'UNKNOWN';
 
     // Create unique ID from NOTAM number
-    const notamNumber = notam.notamNumber || notam.number || `NOTAM-${lat}-${lng}`;
+    const notamNumber = notam.notamNumber || `${notam.facilityDesignator}-${notam.number}` || `NOTAM-${lat}-${lng}`;
 
     return {
       id: notamNumber,
@@ -292,12 +317,12 @@ const parseNOTAMResponse = (data) => {
       status: 'Active NOTAM',
       startDate: startDate,
       endDate: endDate,
-      sponsor: notam.issueOffice || notam.affectedFIR || '',
-      city: notam.location || '',
+      sponsor: notam.facilityDesignator || '',
+      city: notam.facilityDesignator || '',
       state: '',
       dataSource: 'NOTAM',
-      condition: notam.condition || '',
-      icaoLocation: notam.icaoLocation || ''
+      condition: message,
+      icaoLocation: notam.facilityDesignator || ''
     };
   }).filter(crane => crane.latitude !== 0 && crane.longitude !== 0);
 };
