@@ -174,6 +174,7 @@ NOTAMs provide real-time information about temporary crane obstructions. The app
 - The FAA NOTAM Search API may not return all NOTAMs visible on the web interface
 - API responses are sometimes incomplete or delayed
 - On-demand fetching ensures you get the most current data available
+  
 **Missing data from a specific region?**
 - Part 77 regional servers occasionally timeout
 - The update script continues with available regions
