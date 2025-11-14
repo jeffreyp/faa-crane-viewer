@@ -295,6 +295,8 @@ const parseNOTAMResponse = (data) => {
     return [];
   }
 
+  const now = new Date();
+
   const craneNotams = data.notamList.filter(notam => {
     // Filter for obstruction feature
     const isObstruction = notam.keyword === 'OBST' ||
@@ -304,10 +306,28 @@ const parseNOTAMResponse = (data) => {
     const message = notam.traditionalMessageFrom4thWord || '';
     const isCrane = message.toLowerCase().includes('crane');
 
-    return isObstruction && isCrane;
+    if (!isObstruction || !isCrane) {
+      return false;
+    }
+
+    // Filter for currently active NOTAMs based on start/end dates
+    const startDate = notam.startDate ? new Date(notam.startDate) : null;
+    const endDate = notam.endDate ? new Date(notam.endDate) : null;
+
+    // If we have a start date and it's in the future, skip this NOTAM
+    if (startDate && startDate > now) {
+      return false;
+    }
+
+    // If we have an end date and it's in the past, skip this NOTAM
+    if (endDate && endDate < now) {
+      return false;
+    }
+
+    return true;
   });
 
-  console.log(`Filtered to ${craneNotams.length} crane-related NOTAMs`);
+  console.log(`Filtered to ${craneNotams.length} crane-related NOTAMs (currently active)`);
 
   // Transform to standard format
   return craneNotams.map(notam => {
