@@ -39,6 +39,42 @@ const coordinateToDecimal = (coordStr) => {
   return result;
 };
 
+/**
+ * Parse CSV date format (YYYY-MM-DD) to JavaScript Date object
+ * @param {string} dateStr - Date string in CSV format
+ * @returns {Date|null} Parsed Date object or null if invalid
+ */
+const parseCSVDate = (dateStr) => {
+  if (!dateStr || typeof dateStr !== 'string' || dateStr.trim() === '') {
+    return null;
+  }
+
+  // CSV format: "YYYY-MM-DD"
+  const match = dateStr.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+
+  if (!match) {
+    return null;
+  }
+
+  const [, year, month, day] = match;
+
+  // Create date in UTC to avoid timezone issues
+  // Note: month is 0-indexed in JavaScript Date constructor
+  const date = new Date(Date.UTC(
+    parseInt(year),
+    parseInt(month) - 1,  // Convert to 0-indexed month
+    parseInt(day),
+    0, 0, 0, 0
+  ));
+
+  // Validate the date is valid
+  if (isNaN(date.getTime())) {
+    return null;
+  }
+
+  return date;
+};
+
 // Parse CSV data and return crane data
 const parseCSVData = async (csvData) => {
   return new Promise((resolve) => {
@@ -46,33 +82,35 @@ const parseCSVData = async (csvData) => {
       header: true,
       complete: (results) => {
         console.log(`CSV parsed, total rows: ${results.data.length}`);
-        
+
+        const now = new Date();
+
         // Filter for crane entries - handle both DOF and Part77 formats
         const craneData = results.data.filter(entry => {
           // DOF format: Look for entries with "CRANE" in the STRUCTURE TYPE field
-          if (entry['STRUCTURE TYPE'] && 
+          if (entry['STRUCTURE TYPE'] &&
               entry['STRUCTURE TYPE'].toUpperCase().includes('CRANE')) {
             return true;
           }
-          
+
           // Part77 format: Look for entries with "CRANE" in the STRUCTURE TYPE field
           // Part77 data also has crane data marked differently sometimes
-          if (entry['STRUCTURE TYPE'] && 
+          if (entry['STRUCTURE TYPE'] &&
               entry['STRUCTURE TYPE'].includes('CRANE')) {
             return true;
           }
-          
+
           // Additional check for Part77 format that might have CRANE in other fields
-          if ((entry['PROPOSAL DESCRIPTION'] && 
+          if ((entry['PROPOSAL DESCRIPTION'] &&
                entry['PROPOSAL DESCRIPTION'].toUpperCase().includes('CRANE')) ||
-              (entry['STRUCTURE NAME'] && 
+              (entry['STRUCTURE NAME'] &&
                entry['STRUCTURE NAME'].toUpperCase().includes('CRANE'))) {
             return true;
           }
-          
+
           return false;
         });
-        
+
         console.log(`Found ${craneData.length} crane entries in CSV`);
         
         // Transform data to the expected format
@@ -118,9 +156,35 @@ const parseCSVData = async (csvData) => {
             dataSource: dataSource
           };
         }).filter(entry => entry !== null); // Remove entries with invalid coordinates
-        
+
         console.log(`Transformed ${transformedData.length} crane entries`);
-        resolve(transformedData);
+
+        // Filter out inactive cranes based on end date
+        const activeCranes = transformedData.filter(crane => {
+          // If no end date, assume it's still active
+          if (!crane.endDate) {
+            return true;
+          }
+
+          // Parse the end date
+          const endDate = parseCSVDate(crane.endDate);
+
+          // If we can't parse the end date, keep the crane (fail safe)
+          if (!endDate) {
+            return true;
+          }
+
+          // Filter out cranes whose end date has passed
+          if (endDate < now) {
+            console.log(`Filtering out inactive crane ${crane.id}: end date ${crane.endDate} has passed`);
+            return false;
+          }
+
+          return true;
+        });
+
+        console.log(`After date filtering: ${activeCranes.length} active cranes (removed ${transformedData.length - activeCranes.length} inactive)`);
+        resolve(activeCranes);
       },
       error: (error) => {
         console.error('Error parsing CSV:', error);
