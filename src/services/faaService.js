@@ -401,13 +401,20 @@ const parseNOTAMResponse = (data) => {
   const now = new Date();
 
   const craneNotams = data.notamList.filter(notam => {
-    // Filter for obstruction feature
-    const isObstruction = notam.keyword === 'OBST' ||
-                          notam.featureName === 'Obstruction';
+    // Get the message text to search
+    const message = (notam.traditionalMessageFrom4thWord || '').toLowerCase();
 
-    // Filter for crane-related in the traditional message
-    const message = notam.traditionalMessageFrom4thWord || '';
-    const isCrane = message.toLowerCase().includes('crane');
+    // Filter for obstruction-related keywords in the message
+    // Check for: obst, obstacle, obstruction
+    const isObstruction = notam.keyword === 'OBST' ||
+                          notam.featureName === 'Obstruction' ||
+                          message.includes('obst') ||
+                          message.includes('obstacle') ||
+                          message.includes('obstruction');
+
+    // Filter for crane-related keywords in the message
+    // Check for: crane, cranes, tower crane, mobile crane, construction crane
+    const isCrane = message.includes('crane');
 
     if (!isObstruction || !isCrane) {
       return false;
