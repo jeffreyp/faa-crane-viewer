@@ -79,7 +79,7 @@ The static FAA obstacle data (DOF and Part 77) is automatically updated daily at
 
 **NOTAMs** are fetched on-demand when users search, providing real-time data without batch processing delays.
 
-**Note:** The static data update process takes approximately 2-3 minutes.
+**Note:** The static data update process takes approximately 2-3 minutes (DOF + Part77 only).
 ### Monitoring Updates
 
 The status badge at the top of this README shows whether the automated updates are working:

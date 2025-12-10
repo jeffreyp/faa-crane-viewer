@@ -4,9 +4,9 @@ This directory contains scripts to automate the download and processing of FAA o
 
 ## Files
 
-- `update_faa_data.py` - Python script that downloads FAA Digital Obstacle File (DOF), Part 77 regional data, and NOTAM data, then merges and converts to the format used by the crane viewer
-- `fetch_notams.py` - Standalone Python script for testing NOTAM API queries (used during development)
-- `test_notam_api.py` - NOTAM API investigation and testing script
+- `update_faa_data.py` - Python script that downloads FAA Digital Obstacle File (DOF) and Part 77 regional data, then merges and converts to the format used by the crane viewer
+- `fetch_notams.py` - Standalone Python script for testing NOTAM API queries (archived - NOTAMs now fetched on-demand via Cloudflare Worker)
+- `test_notam_api.py` - NOTAM API investigation and testing script (archived)
 - `download-faa-data.js` - Node.js script to download FAA Part 77 regional data files from all 9 FAA regions
 - `merge-faa-data.js` - Node.js script to merge the original datafile.csv with downloaded regional data and create consolidated files
 
@@ -35,28 +35,24 @@ Part 77 data includes structures that have been evaluated for their aeronautical
 
 ### 3. NOTAMs (Notices to Airmen)
 - **URL:** https://notams.aim.faa.gov/notamSearch/
-- **Coverage:** Continental USA via hybrid search strategy
-- **Format:** JSON API responses converted to CSV
-- **Records:** Varies (typically 10-50 active temporary crane obstructions)
+- **Coverage:** User's search area (on-demand)
+- **Format:** JSON from real-time API
+- **Records:** Varies (typically 10-50 active temporary crane obstructions nationwide)
 
-NOTAMs provide real-time information about temporary obstructions. The automation performs a dual-search strategy:
+NOTAMs provide real-time information about temporary obstructions. **Important:** NOTAMs are **NOT** pre-fetched or processed by the automation scripts. Instead, they use an **on-demand architecture**:
 
-**Geographic Grid Search:**
-- 940 grid points at 75 NM spacing (improved from 100 NM)
-- 100 NM search radius per point
-- Complete CONUS coverage with better redundancy
+**On-Demand Fetching:**
+- Fetched when user performs a search in the web application
+- Proxied through Cloudflare Worker (CORS bypass)
+- Real-time data from FAA NOTAM API
+- No pre-fetching or batch processing
+- **Runtime:** < 1 second per user search
 
-**Airport Supplemental Search:**
-- 30 major US airports queried by ICAO code (KATL, KORD, KDFW, KDEN, KLAX, KSFO, KPHX, KIAH, KMIA, KJFK, etc.)
-- 100 NM search radius per airport
-- Targets high-traffic areas where crane activity is most likely
-
-**Processing:**
-- Filtering for class=obstruction and condition contains "CRANE"
-- Active date validation (current date within NOTAM start/end dates)
-- Deduplication by NOTAM number across both search methods
-- 2-second delay between requests for rate limiting
-- **Runtime:** ~32 minutes (31 min grid + 1 min airports)
+**Why On-Demand:**
+- Real-time data (no staleness)
+- No GitHub Actions timeouts
+- Faster overall (users only fetch their search area)
+- Simpler architecture (no complex batch processing)
 
 ## GitHub Actions Workflow
 
@@ -64,16 +60,14 @@ The `.github/workflows/update-faa-data.yml` workflow automatically:
 - Runs daily at 6 AM UTC
 - Downloads the latest FAA DOF data
 - Downloads Part 77 regional data from all 9 FAA regions
-- Fetches current NOTAMs via geographic grid search
-- Processes and merges all three data sources
-- Generates three CSV files:
-  - `public/data/datafile.csv` - Merged DOF + Part77 + NOTAM data
+- Processes and merges both data sources
+- Generates two CSV files:
+  - `public/data/datafile.csv` - Merged DOF + Part77 data
   - `public/data/part77-data.csv` - Part77 data only
-  - `public/data/notams.csv` - NOTAM data only
 - Commits and pushes changes if data has been updated
 - Rebuilds and redeploys to GitHub Pages
 
-**Note:** The workflow has a 60-minute timeout to accommodate the NOTAM search (~32 minutes grid + ~1 minute airports = ~37 minutes total with DOF/Part77 processing).
+**Note:** The workflow has a 10-minute timeout. DOF + Part77 processing typically completes in 2-3 minutes. NOTAMs are fetched on-demand by users, not by GitHub Actions.
 
 ## Manual Testing
 
@@ -107,13 +101,13 @@ The scripts handle multiple data sources and convert them to a standardized form
 ### Python Script (`update_faa_data.py`)
 - **DOF Format:** OAS, VERIFIED STATUS, COUNTRY, STATE, CITY, LATDEC, LONDEC, TYPE, AGL, AMSL, etc.
 - **Part 77 Format:** STUDY (ASN), STATUS, DETERMINATION, LATITUDE, LONGITUDE, STRUCTURE TYPE, AGL HEIGHT DET, etc.
-- **NOTAM Format:** JSON responses from NOTAM Search API containing obstacleNumber, classification, location, coordinates, etc.
-- **Output:** Three CSV files:
-  - `datafile.csv` - Merged data from all three sources
+- **Output:** Two CSV files:
+  - `datafile.csv` - Merged DOF + Part77 data
   - `part77-data.csv` - Part 77 data only (for transparency)
-  - `notams.csv` - NOTAM data only (for transparency)
 
-All outputs use a standardized 47-column CSV format with a `DATA_SOURCE` field indicating origin (DOF, Part77-{REGION}, or NOTAM).
+All outputs use a standardized CSV format with a `DATA_SOURCE` field indicating origin (DOF or Part77-{REGION}).
+
+**NOTAMs:** Fetched on-demand via Cloudflare Worker (see `cloudflare-worker/notam-proxy.js`), not processed by this script.
 
 ### Node.js Scripts
 - **download-faa-data.js:** Downloads Part 77 regional files from all 9 FAA regions
@@ -144,55 +138,19 @@ construction_keywords = ['CONSTRUCTION', 'MOBILE', 'EQUIPMENT', 'VEHICLE']
 ```
 
 ### NOTAM Filtering
-The NOTAM fetching process filters at multiple stages:
+NOTAMs are **not processed by the Python script**. They are fetched on-demand via the Cloudflare Worker proxy when users search. The filtering happens in:
 
-**API Query Filters:**
-```python
-# update_faa_data.py line ~650
-params = {
-    'startDate': start_date.isoformat() + 'Z',
-    'endDate': end_date.isoformat() + 'Z',
-    'searchType': 'latlong',
-    'classification[]': 'obstruction'  # Only obstruction NOTAMs
-}
-```
+1. **Cloudflare Worker** (`cloudflare-worker/notam-proxy.js`):
+   - Filters for obstruction class
+   - Searches for "CRANE" in condition field (case-insensitive)
+   - Returns filtered JSON to browser
 
-**Post-fetch Filtering:**
-```python
-# Keyword filtering (line ~730)
-crane_keywords = ['CRANE', 'TOWER CRANE', 'MOBILE CRANE']
-condition_lower = str(notam.get('condition', '')).lower()
-has_crane = any(kw.lower() in condition_lower for kw in crane_keywords)
+2. **Frontend** (`src/services/faaService.js`):
+   - Parses NOTAM JSON responses
+   - Converts to standard CSV format
+   - Merges with DOF/Part77 data for display
 
-# Date validation (line ~740)
-current_date = datetime.now(timezone.utc)
-is_active = start_datetime <= current_date <= end_datetime
-```
-
-**Test vs Production Mode:**
-To switch between test grid (4 points, ~2 minutes) and production grid (940 points + 805 airports, ~58 minutes):
-
-```python
-# update_faa_data.py line 896
-use_test_grid = False  # Set to True for testing, False for production
-```
-
-**Grid Spacing Configuration:**
-The grid spacing can be adjusted in the `fetch_and_process_notams` function:
-
-```python
-# update_faa_data.py line 886
-grid_points = generate_notam_grid(spacing_nm=75)  # Current: 75 NM (940 points)
-# Alternative: spacing_nm=100 (525 points, faster but less coverage)
-# Alternative: spacing_nm=50 (2100 points, more coverage but slower)
-```
-
-**Airport Search:**
-The airport list is dynamically fetched from OurAirports database in `get_major_airports()` (line 438):
-- Downloads from https://davidmegginson.github.io/ourairports-data/airports.csv
-- Filters for US medium and large airports (805 total)
-- GPS codes starting with 'K' (continental US)
-- Falls back to hardcoded list of 30 major airports if download fails
+See `cloudflare-worker/DEPLOYMENT.md` for NOTAM proxy setup and configuration.
 
 ### JavaScript Script (`merge-faa-data.js`)
 To adjust crane detection in the merge script, modify the `isCraneRelated` function around line 156:
@@ -207,28 +165,27 @@ const craneKeywords = ['CRANE', 'TOWER', 'MOBILE CRANE', 'CONSTRUCTION CRANE', '
 
 ## Troubleshooting
 
-### NOTAM-Specific Issues
+### Script-Specific Issues
 
-**No NOTAMs in output:**
-- NOTAMs are temporary and expire regularly
-- Check that `use_test_grid = False` for production data
-- Verify API is accessible: https://notams.aim.faa.gov/notamSearch/
-- Check console output for "Crane-related NOTAMs: X" message
+**DOF download failures:**
+- The DOF ZIP file can occasionally timeout during download
+- Retry usually works - GitHub Actions will retry failed workflows
+- Check if https://aeronav.faa.gov/Obst_Data/ is accessible
 
-**NOTAM fetch timeout:**
-- Production search takes ~58 minutes (940 grid points + 805 airports with 2-second delays)
-- GitHub Actions has 60-minute timeout configured
-- For faster testing, set `use_test_grid = True` (reduces to 4 points)
+**Part 77 region failures:**
+- Individual regions may be temporarily unavailable
+- The script continues processing other regions when one fails
+- Check workflow logs to see which regions succeeded
 
-**Specific NOTAMs not appearing:**
-- The FAA NOTAM Search API has known limitations
-- Some NOTAMs visible on the web interface may not be returned via API
-- The hybrid search strategy (grid + airports) helps but cannot guarantee 100% capture
-- Example: NOTAM 10/123 (KPHX crane) was visible on the web but not returned by either geographic or ICAO searches
+**No data committed:**
+- If no changes are detected, the script doesn't create a commit
+- This is normal if FAA data hasn't been updated since last run
+- Check workflow logs for "No changes detected" message
 
-**Rate limiting errors:**
-- Default delay is 2 seconds between requests (line 38: `NOTAM_REQUEST_DELAY = 2.0`)
-- Increase delay if rate limited:
-  ```python
-  NOTAM_REQUEST_DELAY = 3.0  # Increase this value if rate limited
-  ```
+### NOTAM Issues
+
+**Note:** NOTAMs are **not processed by this script**. For NOTAM troubleshooting:
+- See `cloudflare-worker/DEPLOYMENT.md` for proxy setup
+- Check browser console for NOTAM fetch errors
+- Verify `NOTAM_PROXY_URL` in `src/config.js`
+- NOTAMs are temporary and may not be active in your search area
