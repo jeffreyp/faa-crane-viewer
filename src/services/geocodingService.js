@@ -1,6 +1,8 @@
 // US-based geocoding service using multiple fallback options
 // Starting with a simpler approach to avoid CORS issues
 
+import { validateAddress, sanitizeGeocodeResult } from '../utils/sanitize';
+
 // Predefined locations for common US cities and states
 const PREDEFINED_LOCATIONS = {
   // Major US cities
@@ -57,12 +59,16 @@ const rateLimit = async () => {
 
 // Geocode an address within the United States
 export const geocodeAddress = async (address) => {
-  if (!address || address.trim().length === 0) {
-    throw new Error('Address is required');
+  // Validate and sanitize input to prevent XSS
+  let validatedAddress;
+  try {
+    validatedAddress = validateAddress(address);
+  } catch (error) {
+    throw new Error(`Invalid address: ${error.message}`);
   }
 
   // First, try to match against predefined locations
-  const normalizedAddress = address.toLowerCase().trim();
+  const normalizedAddress = validatedAddress.toLowerCase().trim();
   let predefinedMatch = PREDEFINED_LOCATIONS[normalizedAddress];
   
   // If no exact match, try partial matching
@@ -89,7 +95,7 @@ export const geocodeAddress = async (address) => {
   
   if (predefinedMatch) {
     console.log('Found predefined location match:', predefinedMatch);
-    return {
+    const result = {
       latitude: predefinedMatch.lat,
       longitude: predefinedMatch.lng,
       displayName: predefinedMatch.name,
@@ -100,6 +106,7 @@ export const geocodeAddress = async (address) => {
       },
       confidence: 1.0
     };
+    return sanitizeGeocodeResult(result);
   }
 
   // If no predefined match, try the external geocoding service
@@ -109,7 +116,7 @@ export const geocodeAddress = async (address) => {
   try {
     // Build query parameters
     const params = new URLSearchParams({
-      q: address.trim(),
+      q: validatedAddress,
       format: 'json',
       addressdetails: '1',
       limit: '5',
@@ -151,10 +158,10 @@ export const geocodeAddress = async (address) => {
       throw new Error(`No valid US addresses found for "${address}". Try one of these: ${suggestions}`);
     }
 
-    // Return the best result
+    // Return the best result (sanitized to prevent XSS)
     const bestResult = usResults[0];
-    
-    return {
+
+    const result = {
       latitude: parseFloat(bestResult.lat),
       longitude: parseFloat(bestResult.lon),
       displayName: bestResult.display_name,
@@ -174,6 +181,8 @@ export const geocodeAddress = async (address) => {
       } : null,
       confidence: bestResult.importance || 0
     };
+
+    return sanitizeGeocodeResult(result);
 
   } catch (error) {
     if (error.name === 'TypeError' && error.message.includes('fetch')) {

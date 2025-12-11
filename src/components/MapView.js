@@ -2,6 +2,7 @@ import React, { useEffect, useRef } from 'react';
 import styled from 'styled-components';
 import L from 'leaflet';
 import { cranesToGeoJson, RADIUS_NM_TO_METERS } from '../services/faaService';
+import { sanitizeText } from '../utils/sanitize';
 
 // Create custom crane icon (for DOF and Part77 data)
 const craneIcon = L.icon({
@@ -130,10 +131,11 @@ const MapView = ({ location, radius, cranes, selectedCraneId, onCraneSelect }) =
         zIndexOffset: 1000 // Ensure the star is on top of other markers
       }).addTo(mapInstanceRef.current);
       
-      // Add popup with address information
+      // Add popup with address information (sanitized to prevent XSS)
+      const sanitizedAddress = sanitizeText(location.address || 'Current location');
       addressMarkerRef.current.bindPopup(`
         <strong>Selected Address</strong><br/>
-        ${location.address || 'Current location'}
+        ${sanitizedAddress}
       `);
     }
   }, [location]);
@@ -177,6 +179,19 @@ const MapView = ({ location, radius, cranes, selectedCraneId, onCraneSelect }) =
         onEachFeature: (feature, layer) => {
           const props = feature.properties;
 
+          // Sanitize all data from CSV to prevent XSS attacks
+          const sanitized = {
+            structureType: sanitizeText(props.structureType || ''),
+            dataSource: sanitizeText(props.dataSource || 'Unknown'),
+            id: sanitizeText(props.id || ''),
+            height: sanitizeText(String(props.height || '')),
+            heightUnit: sanitizeText(props.heightUnit || ''),
+            status: sanitizeText(props.status || ''),
+            startDate: sanitizeText(props.startDate || 'N/A'),
+            endDate: sanitizeText(props.endDate || 'N/A'),
+            sponsor: sanitizeText(props.sponsor || '')
+          };
+
           // Create different popup content based on data source
           const isNOTAM = props.dataSource === 'NOTAM';
 
@@ -189,8 +204,8 @@ const MapView = ({ location, radius, cranes, selectedCraneId, onCraneSelect }) =
           let popupContent = `
             <div style="min-width: 200px;">
               <div style="margin-bottom: 8px;">
-                <strong style="font-size: 1.1rem;">${props.structureType}</strong>
-                <span style="${sourceBadgeStyle}; margin-left: 8px;">${props.dataSource || 'Unknown'}</span>
+                <strong style="font-size: 1.1rem;">${sanitized.structureType}</strong>
+                <span style="${sourceBadgeStyle}; margin-left: 8px;">${sanitized.dataSource}</span>
               </div>
           `;
 
@@ -200,22 +215,22 @@ const MapView = ({ location, radius, cranes, selectedCraneId, onCraneSelect }) =
               <div style="background-color: #FFF3E0; padding: 8px; border-radius: 4px; margin-bottom: 8px;">
                 <strong style="color: #FF8C00;">⚠️ Temporary Obstruction</strong>
               </div>
-              <strong>NOTAM ID:</strong> ${props.id}<br/>
-              <strong>Height:</strong> ${props.height} ${props.heightUnit}<br/>
-              <strong>Status:</strong> ${props.status}<br/>
+              <strong>NOTAM ID:</strong> ${sanitized.id}<br/>
+              <strong>Height:</strong> ${sanitized.height} ${sanitized.heightUnit}<br/>
+              <strong>Status:</strong> ${sanitized.status}<br/>
               <div style="background-color: #E3F2FD; padding: 6px; border-radius: 4px; margin-top: 6px;">
                 <strong>Active Period:</strong><br/>
-                ${props.startDate || 'N/A'} to ${props.endDate || 'N/A'}
+                ${sanitized.startDate} to ${sanitized.endDate}
               </div>
             `;
           } else {
             // DOF/Part77 popup - standard format
             popupContent += `
-              <strong>ID:</strong> ${props.id}<br/>
-              <strong>Height:</strong> ${props.height} ${props.heightUnit}<br/>
-              <strong>Status:</strong> ${props.status}<br/>
-              <strong>Dates:</strong> ${props.startDate} - ${props.endDate}<br/>
-              <strong>Sponsor:</strong> ${props.sponsor}
+              <strong>ID:</strong> ${sanitized.id}<br/>
+              <strong>Height:</strong> ${sanitized.height} ${sanitized.heightUnit}<br/>
+              <strong>Status:</strong> ${sanitized.status}<br/>
+              <strong>Dates:</strong> ${sanitized.startDate} - ${sanitized.endDate}<br/>
+              <strong>Sponsor:</strong> ${sanitized.sponsor}
             `;
           }
 
