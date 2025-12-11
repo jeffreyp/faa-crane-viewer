@@ -23,6 +23,10 @@ beads.left.meta.json
 beads.right.jsonl
 beads.right.meta.json
 
+# Auto-generated files
+.local_version
+README.md
+
 # Keep JSONL exports and config (source of truth for git)
 !issues.jsonl
 !metadata.json
