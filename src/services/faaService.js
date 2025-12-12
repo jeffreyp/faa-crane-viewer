@@ -6,6 +6,112 @@ import { NOTAM_PROXY_URL, NOTAM_CONFIG } from '../config';
 const DOF_CSV_PATH = 'data/datafile.csv';
 const PART77_CSV_PATH = 'data/part77-data.csv';
 
+// Web Worker support detection and pool management
+let workerSupported = false;
+let workerPool = [];
+let workerId = 0;
+
+// Check if Web Workers are supported
+try {
+  if (typeof Worker !== 'undefined') {
+    workerSupported = true;
+    console.log('Web Workers supported - CSV parsing will run in background');
+  }
+} catch (e) {
+  console.warn('Web Workers not supported - CSV parsing will run on main thread');
+}
+
+// Create a worker from the worker pool or create a new one
+const getWorker = () => {
+  if (!workerSupported) {
+    return null;
+  }
+
+  try {
+    // Create worker using Webpack 5's native support
+    const worker = new Worker(new URL('../workers/csvParser.worker.js', import.meta.url));
+    workerPool.push(worker);
+    return worker;
+  } catch (error) {
+    console.error('Failed to create Web Worker:', error);
+    workerSupported = false;
+    return null;
+  }
+};
+
+// Terminate all workers in the pool
+const terminateWorkers = () => {
+  workerPool.forEach(worker => worker.terminate());
+  workerPool = [];
+};
+
+// Parse CSV data using Web Worker (non-blocking)
+const parseCSVDataWithWorker = async (csvData, dataSource) => {
+  return new Promise((resolve, reject) => {
+    const worker = getWorker();
+
+    if (!worker) {
+      // Fallback to main thread if worker creation failed
+      console.warn('Worker unavailable, falling back to main thread parsing');
+      return parseCSVData(csvData).then(resolve).catch(reject);
+    }
+
+    const currentWorkerId = workerId++;
+    let progressCallback = null;
+
+    // Set up message handler
+    const messageHandler = (event) => {
+      const { type, id, data, error, message } = event.data;
+
+      if (id !== currentWorkerId) {
+        // Ignore messages from other workers
+        return;
+      }
+
+      if (type === 'progress') {
+        // Progress update
+        console.log(`[Worker ${dataSource}] ${message}`);
+        if (progressCallback) {
+          progressCallback(message);
+        }
+      } else if (type === 'complete') {
+        // Parsing complete
+        worker.removeEventListener('message', messageHandler);
+        worker.removeEventListener('error', errorHandler);
+        resolve(data);
+      } else if (type === 'error') {
+        // Error in worker
+        worker.removeEventListener('message', messageHandler);
+        worker.removeEventListener('error', errorHandler);
+        console.error(`Worker error for ${dataSource}:`, error);
+        // Fallback to main thread
+        console.log('Falling back to main thread parsing');
+        parseCSVData(csvData).then(resolve).catch(reject);
+      }
+    };
+
+    // Set up error handler
+    const errorHandler = (error) => {
+      worker.removeEventListener('message', messageHandler);
+      worker.removeEventListener('error', errorHandler);
+      console.error('Worker error:', error);
+      // Fallback to main thread
+      console.log('Falling back to main thread parsing');
+      parseCSVData(csvData).then(resolve).catch(reject);
+    };
+
+    worker.addEventListener('message', messageHandler);
+    worker.addEventListener('error', errorHandler);
+
+    // Send CSV data to worker
+    worker.postMessage({
+      id: currentWorkerId,
+      csvData,
+      dataSource
+    });
+  });
+};
+
 // Convert DMS (Degrees-Minutes-Seconds) to decimal degrees or return decimal if already in decimal format
 const coordinateToDecimal = (coordStr) => {
   if (!coordStr) return null;
@@ -532,27 +638,38 @@ export const fetchCraneData = async (location, radiusNM) => {
 
     let allCraneData = [];
 
-    // Process DOF data if available
+    // Process DOF and Part77 data in parallel using Web Workers
+    const parsePromises = [];
+
     if (dofResponse.ok) {
       console.log('Processing DOF data...');
       const dofText = await dofResponse.text();
-      const dofCranes = await parseCSVData(dofText);
-      allCraneData.push(...dofCranes);
-      console.log(`Loaded ${dofCranes.length} DOF cranes`);
+      parsePromises.push(
+        parseCSVDataWithWorker(dofText, 'DOF').then(dofCranes => {
+          console.log(`Loaded ${dofCranes.length} DOF cranes`);
+          return dofCranes;
+        })
+      );
     } else {
       console.warn('Failed to fetch DOF data:', dofResponse.status);
     }
 
-    // Process Part77 data if available
     if (part77Response.ok) {
       console.log('Processing Part77 data...');
       const part77Text = await part77Response.text();
-      const part77Cranes = await parseCSVData(part77Text);
-      allCraneData.push(...part77Cranes);
-      console.log(`Loaded ${part77Cranes.length} Part77 cranes`);
+      parsePromises.push(
+        parseCSVDataWithWorker(part77Text, 'Part77').then(part77Cranes => {
+          console.log(`Loaded ${part77Cranes.length} Part77 cranes`);
+          return part77Cranes;
+        })
+      );
     } else {
       console.warn('Failed to fetch Part77 data:', part77Response.status);
     }
+
+    // Wait for all parsing to complete (parallel parsing in workers)
+    const parsedResults = await Promise.all(parsePromises);
+    parsedResults.forEach(cranes => allCraneData.push(...cranes));
 
     // Add NOTAM data (already filtered and formatted)
     if (notamCranes.length > 0) {
@@ -650,6 +767,9 @@ export const cranesToGeoJson = (cranes) => {
 
 // Export constants for use in components
 export const RADIUS_NM_TO_METERS = nauticalMilesToMeters;
+
+// Export worker cleanup function for use in components (e.g., unmount)
+export const cleanupWorkers = terminateWorkers;
 
 // Mock data for crane locations around Tolleson, AZ
 // This is used as a fallback if the CSV data can't be loaded
