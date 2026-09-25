@@ -126,3 +126,4 @@ jobs:
         npx gh-pages -d public -r https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        CARTO_API_KEY: ${{ secrets.CARTO_API_KEY }}

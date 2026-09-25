@@ -3,6 +3,7 @@ import styled from 'styled-components';
 import L from 'leaflet';
 import { cranesToGeoJson, RADIUS_NM_TO_METERS } from '../services/faaService';
 import { sanitizeText } from '../utils/sanitize';
+import { CARTO_API_KEY } from '../config';
 
 // Create custom crane icon (for DOF and Part77 data)
 const craneIcon = L.icon({
@@ -86,7 +87,8 @@ const MapView = ({ location, radius, cranes, selectedCraneId, onCraneSelect }) =
     if (!mapInstanceRef.current) {
       const map = L.map(mapRef.current).setView([location.lat, location.lng], 11);
       
-      L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
+      const tileKeyParam = CARTO_API_KEY ? `?key=${CARTO_API_KEY}` : '';
+      L.tileLayer(`https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png${tileKeyParam}`, {
         attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>'
       }).addTo(map);
       
