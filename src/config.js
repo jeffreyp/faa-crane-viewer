@@ -12,8 +12,16 @@
  * Example: 'https://faa-notam-proxy.YOUR-SUBDOMAIN.workers.dev'
  *
  * For local testing, you can temporarily set this to null to skip NOTAM fetching.
+ *
+ * DISABLED (2026-09-25): the FAA retired the legacy notamSearch endpoint this worker
+ * proxies (notams.aim.faa.gov/notamSearch) on 2026-04-18 in favor of the new NOTAM
+ * Management Service. The old endpoint now returns 403 (Akamai "Access Denied") to
+ * every request, including ones sent directly with a real browser User-Agent - it's
+ * not fixable via headers/CORS. Re-enable once migrated to the official FAA NOTAM API
+ * (https://api.faa.gov/notamapi/, client_id/client_secret auth) or granted access to
+ * the new NMS API (contact notams@faa.gov).
  */
-export const NOTAM_PROXY_URL = 'https://faa-notam-proxy.jeffreyp07.workers.dev';
+export const NOTAM_PROXY_URL = null;
 
 /**
  * CARTO Basemaps API key
