@@ -2,14 +2,14 @@
 
 ![DOF Data](https://img.shields.io/badge/DOF-Daily%20Updates-blue?logo=data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCI+PHBhdGggZmlsbD0id2hpdGUiIGQ9Ik0xMiAyQzYuNDggMiAyIDYuNDggMiAxMnM0LjQ4IDEwIDEwIDEwIDEwLTQuNDggMTAtMTBTMTcuNTIgMiAxMiAyem0tMiAxNWwtNS01IDEuNDEtMS40MUwxMCAxNC4xN2w3LjU5LTcuNTlMMTkgOGwtOSA5eiIvPjwvc3ZnPg==)
 ![OEAAA Data](https://img.shields.io/badge/OEAAA-Daily%20Updates-green?logo=data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCI+PHBhdGggZmlsbD0id2hpdGUiIGQ9Ik0xMiAyQzYuNDggMiAyIDYuNDggMiAxMnM0LjQ4IDEwIDEwIDEwIDEwLTQuNDggMTAtMTBTMTcuNTIgMiAxMiAyem0tMiAxNWwtNS01IDEuNDEtMS40MUwxMCAxNC4xN2w3LjU5LTcuNTlMMTkgOGwtOSA5eiIvPjwvc3ZnPg==)
-![NOTAM Data](https://img.shields.io/badge/NOTAM-On--Demand-orange?logo=data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCI+PHBhdGggZmlsbD0id2hpdGUiIGQ9Ik0xMiAyQzYuNDggMiAyIDYuNDggMiAxMnM0LjQ4IDEwIDEwIDEwIDEwLTQuNDggMTAtMTBTMTcuNTIgMiAxMiAyem0tMiAxNWwtNS01IDEuNDEtMS40MUwxMCAxNC4xN2w3LjU5LTcuNTlMMTkgOGwtOSA5eiIvPjwvc3ZnPg==)
+![NOTAM Data](https://img.shields.io/badge/NOTAM-Temporarily%20Disabled-lightgrey?logo=data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCI+PHBhdGggZmlsbD0id2hpdGUiIGQ9Ik0xMiAyQzYuNDggMiAyIDYuNDggMiAxMnM0LjQ4IDEwIDEwIDEwIDEwLTQuNDggMTAtMTBTMTcuNTIgMiAxMiAyem0tMiAxNWwtNS01IDEuNDEtMS40MUwxMCAxNC4xN2w3LjU5LTcuNTlMMTkgOGwtOSA5eiIvPjwvc3ZnPg==)
 
 An entirely vibe-coded web application that displays construction cranes within a user-specified nautical mile radius of a US address/location.
 
-The application aggregates crane data from three FAA sources:
+The application aggregates crane data from FAA sources:
 - **DOF (Digital Obstacle File)** - Permanent crane structures nationwide (updated daily)
 - **Part 77 Regional Data** - Aeronautical impact assessments from 9 FAA regions (updated daily)
-- **NOTAMs (Notices to Airmen)** - Temporary crane obstructions fetched in real-time
+- **NOTAMs (Notices to Airmen)** - Temporary crane obstructions fetched in real-time *(currently disabled - see [NOTAMs](#3-notams-notices-to-airmen) below)*
 
 See [demo page](https://jeffreyp.github.io/faa-crane-viewer). 
 
@@ -19,7 +19,7 @@ See [demo page](https://jeffreyp.github.io/faa-crane-viewer).
 - Adjust the search radius (in nautical miles)
 - View cranes on an interactive map with source-specific markers:
   - Blue crane icons for DOF/Part77 permanent structures
-  - Orange pulsing triangles for NOTAM temporary obstructions
+  - Orange pulsing triangles for NOTAM temporary obstructions (when NOTAMs are enabled)
 - See crane details in a sortable table view with color-coded source badges
 - Comprehensive coverage from multiple FAA data sources
 
@@ -77,7 +77,7 @@ The static FAA obstacle data (DOF and Part 77) is automatically updated daily at
 - Processes and merges data from both sources
 - Commits updated data and redeploys to GitHub Pages
 
-**NOTAMs** are fetched on-demand when users search, providing real-time data without batch processing delays.
+**NOTAMs** are normally fetched on-demand when users search, providing real-time data without batch processing delays - see [NOTAMs](#3-notams-notices-to-airmen) for their current disabled status.
 
 **Note:** The static data update process takes approximately 2-3 minutes (DOF + Part77 only).
 ### Monitoring Updates
@@ -122,13 +122,18 @@ Part 77 data includes structures that have been evaluated for their aeronautical
 
 ### 3. NOTAMs (Notices to Airmen)
 
-**Source:** FAA NOTAM Search API
+**Status:** ⚠️ Disabled as of 2026-09-25
+**Source:** FAA NOTAM Search API (legacy)
 **URL:** https://notams.aim.faa.gov/notamSearch/
 **Update Frequency:** Real-time (fetched on-demand during user searches)
 **Coverage:** User's search area
 **Records:** Varies (typically 10-50 active crane-related temporary obstructions nationwide)
 
-NOTAMs provide real-time information about temporary crane obstructions. The application uses an **on-demand architecture**:
+**Why it's disabled:** The FAA retired this legacy NOTAM Search system on 2026-04-18 in favor of a new NOTAM Management Service (NMS). The old search endpoint now returns a 403 ("Access Denied") from FAA's Akamai edge on every request, including ones made directly with a real browser User-Agent - this is an upstream FAA change, not a bug in this app's proxy. `NOTAM_PROXY_URL` in `src/config.js` is set to `null` to stop hitting the dead endpoint; the app falls back to DOF and Part 77 data only.
+
+**Path to re-enabling:** Either register for the official FAA NOTAM API (self-serve `client_id`/`client_secret` at https://api.faa.gov/notamapi/) or request access to the new NMS API (contact notams@faa.gov). Both require updating the request/auth logic in `src/services/faaService.js` and `cloudflare-worker/notam-proxy.js`, since the response format differs from the legacy search endpoint.
+
+NOTAMs normally provide real-time information about temporary crane obstructions via an **on-demand architecture**:
 
 **On-Demand Fetching:**
 - Fetched when user performs a search
@@ -164,16 +169,15 @@ NOTAMs provide real-time information about temporary crane obstructions. The app
 ### Troubleshooting Data Issues
 
 **No NOTAM markers visible?**
-- NOTAMs are temporary and relatively rare in any given search area
-- Orange markers only appear for active crane-related NOTAMs within your search radius
+- As of 2026-09-25, NOTAM fetching is disabled by default (`NOTAM_PROXY_URL = null` in `src/config.js`) because the legacy FAA NOTAM Search API it depends on was retired - see [NOTAMs](#3-notams-notices-to-airmen) above
+- If you've re-enabled it: NOTAMs are temporary and relatively rare in any given search area; orange markers only appear for active crane-related NOTAMs within your search radius
 - Check browser console for NOTAM fetch success/failure messages
 - Verify `NOTAM_PROXY_URL` is configured in `src/config.js`
 - Ensure Cloudflare Worker is deployed and accessible
 
 **Known NOTAM API Limitations:**
-- The FAA NOTAM Search API may not return all NOTAMs visible on the web interface
-- API responses are sometimes incomplete or delayed
-- On-demand fetching ensures you get the most current data available
+- The legacy FAA NOTAM Search API is retired and returns 403 for all requests (see above)
+- Historically, that API did not always return all NOTAMs visible on the web interface, and responses were sometimes incomplete or delayed
   
 **Missing data from a specific region?**
 - Part 77 regional servers occasionally timeout
