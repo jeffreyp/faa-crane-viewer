@@ -69,6 +69,8 @@ const App = () => {
       // Display warning if mock data was used
       if (result.usedMockData) {
         setError(`Warning: Using mock data. Could not load CSV: ${result.error}`);
+      } else if (result.staleDataAsOf) {
+        setError(`Warning: Couldn't reach the server. Showing cached crane data from ${result.staleDataAsOf.toLocaleString()}.`);
       }
     } catch (err) {
       setError(`Failed to fetch crane data: ${err.message || 'Unknown error'}`);

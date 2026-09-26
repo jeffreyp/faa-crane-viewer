@@ -14,6 +14,8 @@ const CACHE_VERSION = 1;
 const REVALIDATE_INTERVAL_MS = 10 * 60 * 1000;
 // Discard cached data older than this even if the server says it is unchanged
 const MAX_CACHE_AGE_MS = 24 * 60 * 60 * 1000;
+// When the server can't be reached, fall back to cached data no older than this
+const MAX_STALE_FALLBACK_MS = 3 * 24 * 60 * 60 * 1000;
 
 // In-memory copy of cache entries so repeat searches skip IndexedDB too
 const memoryCache = new Map();
@@ -644,9 +646,12 @@ const saveCacheEntry = (path, entry) => {
  * Load parsed crane data for one CSV, using the IndexedDB cache when possible.
  * Cached data is revalidated with a conditional request (ETag / Last-Modified)
  * at most every REVALIDATE_INTERVAL_MS, and discarded after MAX_CACHE_AGE_MS.
+ * If the server can't be reached, cached data up to MAX_STALE_FALLBACK_MS old is
+ * returned with staleSince set so the UI can warn about it.
  * @param {string} path - CSV path
  * @param {string} label - Data source label for logging and the worker
- * @returns {Promise<Array|null>} Active cranes, or null if the CSV could not be loaded
+ * @returns {Promise<{cranes: Array, staleSince: number|null}|null>} Active cranes, and the
+ *   cache timestamp if they came from a stale fallback; null if the CSV could not be loaded
  */
 const loadDataset = async (path, label) => {
   let cached = memoryCache.get(path) || await getCachedDataset(path);
@@ -659,8 +664,16 @@ const loadDataset = async (path, label) => {
   if (cached && now - cached.validatedAt < REVALIDATE_INTERVAL_MS) {
     console.log(`Using cached ${label} data (validated ${Math.round((now - cached.validatedAt) / 1000)}s ago)`);
     memoryCache.set(path, cached);
-    return filterActiveCranes(cached.data);
+    return { cranes: filterActiveCranes(cached.data), staleSince: null };
   }
+
+  const staleFallback = () => {
+    if (!cached || now - cached.cachedAt > MAX_STALE_FALLBACK_MS) {
+      return null;
+    }
+    console.warn(`Using stale cached ${label} data from ${new Date(cached.cachedAt).toISOString()}`);
+    return { cranes: filterActiveCranes(cached.data), staleSince: cached.cachedAt };
+  };
 
   // Only revalidate cache entries younger than a day; older ones get a full refetch
   const revalidatable = cached && now - cached.cachedAt < MAX_CACHE_AGE_MS ? cached : null;
@@ -677,9 +690,10 @@ const loadDataset = async (path, label) => {
     // resolved against the browser HTTP cache
     response = await fetch(path, revalidatable ? { headers, cache: 'no-store' } : undefined);
   } catch (error) {
-    if (cached) {
-      console.warn(`Network error fetching ${label} data, using stale cache:`, error);
-      return filterActiveCranes(cached.data);
+    console.warn(`Network error fetching ${label} data:`, error);
+    const fallback = staleFallback();
+    if (fallback) {
+      return fallback;
     }
     throw error;
   }
@@ -697,12 +711,12 @@ const loadDataset = async (path, label) => {
     console.log(`${label} data unchanged on server, using cache`);
     response.body?.cancel();
     saveCacheEntry(path, { ...revalidatable, validatedAt: now });
-    return filterActiveCranes(revalidatable.data);
+    return { cranes: filterActiveCranes(revalidatable.data), staleSince: null };
   }
 
   if (!response.ok) {
     console.warn(`Failed to fetch ${label} data:`, response.status);
-    return cached ? filterActiveCranes(cached.data) : null;
+    return staleFallback();
   }
 
   console.log(`Processing ${label} data...`);
@@ -719,7 +733,7 @@ const loadDataset = async (path, label) => {
     validatedAt: now
   });
 
-  return cranes;
+  return { cranes, staleSince: null };
 };
 
 // Share one in-flight load per CSV between concurrent searches
@@ -737,17 +751,21 @@ export const fetchCraneData = async (location, radiusNM) => {
     console.log('Fetching crane data from DOF, Part77, and NOTAM sources...');
 
     // Load DOF and Part77 data (from cache or network) and NOTAMs in parallel
-    const [dofCranes, part77Cranes, notamCranes] = await Promise.all([
+    const [dofResult, part77Result, notamCranes] = await Promise.all([
       loadDatasetOnce(DOF_CSV_PATH, 'DOF'),
       loadDatasetOnce(PART77_CSV_PATH, 'Part77'),
       location && NOTAM_PROXY_URL ? fetchNOTAMs(location.lat, location.lng, radiusNM) : []
     ]);
 
-    if (!dofCranes && !part77Cranes) {
+    if (!dofResult && !part77Result) {
       throw new Error('Failed to fetch CSV files: DOF and Part77 both unavailable');
     }
 
-    let allCraneData = [...(dofCranes || []), ...(part77Cranes || [])];
+    let allCraneData = [...(dofResult?.cranes || []), ...(part77Result?.cranes || [])];
+
+    // Oldest cache timestamp among datasets that fell back to stale data, if any
+    const staleTimes = [dofResult?.staleSince, part77Result?.staleSince].filter(Boolean);
+    const staleDataAsOf = staleTimes.length > 0 ? new Date(Math.min(...staleTimes)) : null;
 
     // Add NOTAM data (already filtered and formatted)
     if (notamCranes.length > 0) {
@@ -781,7 +799,7 @@ export const fetchCraneData = async (location, radiusNM) => {
       console.log(`Filtered to ${allCraneData.length} cranes within ${radiusNM}nm radius`);
     }
 
-    return { data: allCraneData, usedMockData: false };
+    return { data: allCraneData, usedMockData: false, staleDataAsOf };
   } catch (error) {
     console.error('Error fetching crane data:', error);
 
