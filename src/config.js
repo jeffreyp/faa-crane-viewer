@@ -17,9 +17,10 @@
  * proxies (notams.aim.faa.gov/notamSearch) on 2026-04-18 in favor of the new NOTAM
  * Management Service. The old endpoint now returns 403 (Akamai "Access Denied") to
  * every request, including ones sent directly with a real browser User-Agent - it's
- * not fixable via headers/CORS. Re-enable once migrated to the official FAA NOTAM API
- * (https://api.faa.gov/notamapi/, client_id/client_secret auth) or granted access to
- * the new NMS API (contact notams@faa.gov).
+ * not fixable via headers/CORS. The old self-serve FAA NOTAM API signup
+ * (api.faa.gov/notamapi) is also gone. Re-enable once granted access to the new NMS
+ * API (email notams@faa.gov for clientId/clientSecret) and the worker and
+ * faaService.js are migrated to it - tracked in beads epic fcv-gyi.
  */
 export const NOTAM_PROXY_URL = null;
 

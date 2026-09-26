@@ -131,7 +131,7 @@ Part 77 data includes structures that have been evaluated for their aeronautical
 
 **Why it's disabled:** The FAA retired this legacy NOTAM Search system on 2026-04-18 in favor of a new NOTAM Management Service (NMS). The old search endpoint now returns a 403 ("Access Denied") from FAA's Akamai edge on every request, including ones made directly with a real browser User-Agent - this is an upstream FAA change, not a bug in this app's proxy. `NOTAM_PROXY_URL` in `src/config.js` is set to `null` to stop hitting the dead endpoint; the app falls back to DOF and Part 77 data only.
 
-**Path to re-enabling:** Either register for the official FAA NOTAM API (self-serve `client_id`/`client_secret` at https://api.faa.gov/notamapi/) or request access to the new NMS API (contact notams@faa.gov). Both require updating the request/auth logic in `src/services/faaService.js` and `cloudflare-worker/notam-proxy.js`, since the response format differs from the legacy search endpoint.
+**Path to re-enabling:** The old self-serve FAA NOTAM API signup (api.faa.gov/notamapi) no longer exists, so the only route is the new NMS API. Access is not self-serve: email notams@faa.gov to request a `clientId`/`clientSecret`. Once granted, the request/auth logic in `cloudflare-worker/notam-proxy.js` and the fetch/parse logic in `src/services/faaService.js` must be migrated, since the NMS response format (GeoJSON/AIXM) differs from the legacy search endpoint.
 
 NOTAMs normally provide real-time information about temporary crane obstructions via an **on-demand architecture**:
 
