@@ -186,6 +186,7 @@ const parseCSVData = async (csvData) => {
   return new Promise((resolve) => {
     Papa.parse(csvData, {
       header: true,
+      transformHeader: header => header.trim(),
       complete: (results) => {
         console.log(`CSV parsed, total rows: ${results.data.length}`);
 

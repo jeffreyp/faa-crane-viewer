@@ -78,6 +78,7 @@ const parseCSVData = (csvData, dataSource) => {
   return new Promise((resolve, reject) => {
     Papa.parse(csvData, {
       header: true,
+      transformHeader: header => header.trim(),
       complete: (results) => {
         try {
           const totalRows = results.data.length;
