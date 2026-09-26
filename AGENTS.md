@@ -40,7 +40,6 @@ Some FAA headers have trailing spaces (for example `"SPONSOR NAME "`); see `fcv-
 - Build output (`public/bundle.js` and the other `public/*.bundle.js` chunks) is checked in. Rebuild with `npm run build` before committing source changes, or the deployed site won't match.
 - A build without `CARTO_API_KEY` works, but the map tiles are watermarked. CI reads the key from the `CARTO_API_KEY` repo secret, and webpack injects it through `DefinePlugin`. Never hardcode it.
 - Individual Part 77 regions fail sometimes. The script is designed to log the failure and continue; keep that behavior (catch, log, return empty rather than abort).
-- `scripts/download-faa-data.js`, `scripts/merge-faa-data.js`, `scripts/fetch_notams.py`, and `public/data/notams*` are unused leftovers (`fcv-29d`). `scripts/update_faa_data.py` is the only live pipeline.
 
 ## Conventions
 
