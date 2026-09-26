@@ -232,19 +232,18 @@ Display on MapView (Leaflet markers) + TableView (sortable table)
 
 **Tool:** Beads (bd) CLI
 **Location:**
-  - macOS: `/usr/local/bin/bd`
+  - macOS: `/opt/homebrew/bin/bd` (Homebrew, v1.3+)
   - Ubuntu: `/home/ubuntu/.local/bin/bd`
-  - Or via MCP server (accessible in Claude Code)
-**Database:** `.beads/beads.db`
-**JSONL:** `.beads/beads.base.jsonl` (git-tracked)
-**Issue Prefix:** `faa-crane-viewer`
-**Issue Format:** `faa-crane-viewer-{id}`
+**Backend:** Embedded Dolt database in `.beads/embeddeddolt/` (gitignored)
+**JSONL:** `.beads/issues.jsonl` (git-tracked export)
+**Issue Prefix:** `fcv`
+**Issue Format:** `fcv-{id}`
 
 ### Git Integration
 
-- ✅ Git hooks installed (prevents race conditions with auto-flush)
-- ✅ Git merge driver configured (intelligent JSONL merging)
-- ⚠️ Both `.beads/` directory and JSONL are gitignored per `.gitignore`
+- Git hooks live in `.beads/hooks/` (`core.hooksPath` points there)
+- Dolt data syncs via `refs/dolt/data` on the git remote (`bd dolt push` / `bd dolt pull`)
+- Migrated from the legacy SQLite backend (bd 0.23) on 2026-09-26 by re-importing `issues.jsonl`
 
 ### Common Commands
 
@@ -253,16 +252,16 @@ Display on MapView (Leaflet markers) + TableView (sortable table)
 bd list --status open
 
 # Show issue details with children
-bd show faa-crane-viewer-pvk
+bd show fcv-pvk
 
 # Create new issue
 bd create "Issue title" -t task -p 2 -d "Description"
 
 # Update issue status
-bd update faa-crane-viewer-pvk.1 -s in_progress
+bd update fcv-pvk.1 -s in_progress
 
 # Close issue
-bd close faa-crane-viewer-pvk.1 --reason "Completed"
+bd close fcv-pvk.1 --reason "Completed"
 
 # Find ready-to-work tasks
 bd ready
@@ -275,7 +274,7 @@ bd stats
 
 - Issues can have parent-child relationships for organizing work
 - Use `--parent <parent-id>` when creating child tasks
-- Children are auto-numbered (e.g., `faa-crane-viewer-abc.1`, `.2`, etc.)
+- Children are auto-numbered (e.g., `fcv-abc.1`, `.2`, etc.)
 
 ### Priority Levels
 
@@ -556,16 +555,18 @@ origin  https://github.com/jeffreyp/faa-crane-viewer.git
 **Symptom:** `bd` command not found or MCP errors
 **Check:**
 - `which bd` should return a valid path:
-  - macOS: `/usr/local/bin/bd`
+  - macOS: `/opt/homebrew/bin/bd`
   - Ubuntu: `/home/ubuntu/.local/bin/bd`
-- `.beads/beads.db` exists
-- `.beads/beads.base.jsonl` exists and is valid JSON Lines
+- `.beads/embeddeddolt/` exists
+- `.beads/issues.jsonl` exists and is valid JSON Lines
+- `bd ready` runs without errors
 - MCP server may need Claude Code restart
 
 **Common fixes:**
 - Restart Claude Code to reload MCP servers
 - Use Bash tool with `bd` command directly if MCP fails
 - Verify beads is initialized: `bd list`
+- If the workspace is missing, rebuild it: `bd init --from-jsonl --prefix fcv`
 
 ---
 
