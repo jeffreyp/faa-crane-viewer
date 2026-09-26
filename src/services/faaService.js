@@ -1,10 +1,24 @@
 // Real FAA crane data parser for CSV files from OE/AAA system
 import Papa from 'papaparse';
 import { NOTAM_PROXY_URL, NOTAM_CONFIG } from '../config';
+import { getCachedDataset, setCachedDataset } from '../utils/cache';
 
 // Constants - using direct absolute path for webpack dev server
 const DOF_CSV_PATH = 'data/datafile.csv';
 const PART77_CSV_PATH = 'data/part77-data.csv';
+
+// Parsed-data cache settings
+// Bump CACHE_VERSION whenever the parsed crane object shape changes
+const CACHE_VERSION = 1;
+// Skip the network entirely if the cache was validated this recently (matches GitHub Pages max-age)
+const REVALIDATE_INTERVAL_MS = 10 * 60 * 1000;
+// Discard cached data older than this even if the server says it is unchanged
+const MAX_CACHE_AGE_MS = 24 * 60 * 60 * 1000;
+
+// In-memory copy of cache entries so repeat searches skip IndexedDB too
+const memoryCache = new Map();
+// In-flight loads, so concurrent searches share a single fetch/parse
+const inflightLoads = new Map();
 
 // Web Worker support detection and pool management
 let workerSupported = false;
@@ -610,67 +624,130 @@ const parseNOTAMResponse = (data) => {
   }).filter(crane => crane.latitude !== 0 && crane.longitude !== 0);
 };
 
+// Drop cranes whose end date has passed. Cached data can be up to a day old,
+// so this is re-applied every time cached data is used.
+const filterActiveCranes = (cranes) => {
+  const now = new Date();
+  return cranes.filter(crane => {
+    const endDate = crane.endDate ? parseCSVDate(crane.endDate) : null;
+    return !endDate || endDate >= now;
+  });
+};
+
+const saveCacheEntry = (path, entry) => {
+  memoryCache.set(path, entry);
+  // Fire and forget; setCachedDataset never rejects
+  setCachedDataset(path, entry);
+};
+
+/**
+ * Load parsed crane data for one CSV, using the IndexedDB cache when possible.
+ * Cached data is revalidated with a conditional request (ETag / Last-Modified)
+ * at most every REVALIDATE_INTERVAL_MS, and discarded after MAX_CACHE_AGE_MS.
+ * @param {string} path - CSV path
+ * @param {string} label - Data source label for logging and the worker
+ * @returns {Promise<Array|null>} Active cranes, or null if the CSV could not be loaded
+ */
+const loadDataset = async (path, label) => {
+  let cached = memoryCache.get(path) || await getCachedDataset(path);
+  if (cached && cached.version !== CACHE_VERSION) {
+    cached = null;
+  }
+
+  const now = Date.now();
+
+  if (cached && now - cached.validatedAt < REVALIDATE_INTERVAL_MS) {
+    console.log(`Using cached ${label} data (validated ${Math.round((now - cached.validatedAt) / 1000)}s ago)`);
+    memoryCache.set(path, cached);
+    return filterActiveCranes(cached.data);
+  }
+
+  // Only revalidate cache entries younger than a day; older ones get a full refetch
+  const revalidatable = cached && now - cached.cachedAt < MAX_CACHE_AGE_MS ? cached : null;
+  const headers = {};
+  if (revalidatable?.etag) {
+    headers['If-None-Match'] = revalidatable.etag;
+  } else if (revalidatable?.lastModified) {
+    headers['If-Modified-Since'] = revalidatable.lastModified;
+  }
+
+  let response;
+  try {
+    // no-store with conditional headers so a 304 reaches us instead of being
+    // resolved against the browser HTTP cache
+    response = await fetch(path, revalidatable ? { headers, cache: 'no-store' } : undefined);
+  } catch (error) {
+    if (cached) {
+      console.warn(`Network error fetching ${label} data, using stale cache:`, error);
+      return filterActiveCranes(cached.data);
+    }
+    throw error;
+  }
+
+  // Some servers (e.g. webpack-dev-server) ignore conditional headers on no-cache
+  // requests and send a full 200, so also compare validators on the response
+  const etag = response.headers.get('ETag');
+  const lastModified = response.headers.get('Last-Modified');
+  const unchanged = revalidatable && (
+    response.status === 304 ||
+    (response.ok && (etag ? etag === revalidatable.etag : lastModified && lastModified === revalidatable.lastModified))
+  );
+
+  if (unchanged) {
+    console.log(`${label} data unchanged on server, using cache`);
+    response.body?.cancel();
+    saveCacheEntry(path, { ...revalidatable, validatedAt: now });
+    return filterActiveCranes(revalidatable.data);
+  }
+
+  if (!response.ok) {
+    console.warn(`Failed to fetch ${label} data:`, response.status);
+    return cached ? filterActiveCranes(cached.data) : null;
+  }
+
+  console.log(`Processing ${label} data...`);
+  const text = await response.text();
+  const cranes = await parseCSVDataWithWorker(text, label);
+  console.log(`Loaded ${cranes.length} ${label} cranes`);
+
+  saveCacheEntry(path, {
+    version: CACHE_VERSION,
+    data: cranes,
+    etag,
+    lastModified,
+    cachedAt: now,
+    validatedAt: now
+  });
+
+  return cranes;
+};
+
+// Share one in-flight load per CSV between concurrent searches
+const loadDatasetOnce = (path, label) => {
+  if (!inflightLoads.has(path)) {
+    const promise = loadDataset(path, label).finally(() => inflightLoads.delete(path));
+    inflightLoads.set(path, promise);
+  }
+  return inflightLoads.get(path);
+};
+
 // Fetch crane data from DOF, Part77 CSV files and on-demand NOTAMs
 export const fetchCraneData = async (location, radiusNM) => {
   try {
     console.log('Fetching crane data from DOF, Part77, and NOTAM sources...');
 
-    // Build array of fetch promises
-    const fetchPromises = [
-      fetch(DOF_CSV_PATH),
-      fetch(PART77_CSV_PATH)
-    ];
+    // Load DOF and Part77 data (from cache or network) and NOTAMs in parallel
+    const [dofCranes, part77Cranes, notamCranes] = await Promise.all([
+      loadDatasetOnce(DOF_CSV_PATH, 'DOF'),
+      loadDatasetOnce(PART77_CSV_PATH, 'Part77'),
+      location && NOTAM_PROXY_URL ? fetchNOTAMs(location.lat, location.lng, radiusNM) : []
+    ]);
 
-    // Add NOTAM fetch if location is provided and proxy is configured
-    if (location && NOTAM_PROXY_URL) {
-      fetchPromises.push(fetchNOTAMs(location.lat, location.lng, radiusNM));
+    if (!dofCranes && !part77Cranes) {
+      throw new Error('Failed to fetch CSV files: DOF and Part77 both unavailable');
     }
 
-    // Fetch DOF, Part77 CSVs and NOTAMs in parallel
-    const results = await Promise.all(fetchPromises);
-
-    const dofResponse = results[0];
-    const part77Response = results[1];
-    const notamCranes = results[2] || []; // NOTAMs or empty array
-
-    if (!dofResponse.ok && !part77Response.ok) {
-      throw new Error(`Failed to fetch CSV files: DOF ${dofResponse.status}, Part77 ${part77Response.status}`);
-    }
-
-    let allCraneData = [];
-
-    // Process DOF and Part77 data in parallel using Web Workers
-    const parsePromises = [];
-
-    if (dofResponse.ok) {
-      console.log('Processing DOF data...');
-      const dofText = await dofResponse.text();
-      parsePromises.push(
-        parseCSVDataWithWorker(dofText, 'DOF').then(dofCranes => {
-          console.log(`Loaded ${dofCranes.length} DOF cranes`);
-          return dofCranes;
-        })
-      );
-    } else {
-      console.warn('Failed to fetch DOF data:', dofResponse.status);
-    }
-
-    if (part77Response.ok) {
-      console.log('Processing Part77 data...');
-      const part77Text = await part77Response.text();
-      parsePromises.push(
-        parseCSVDataWithWorker(part77Text, 'Part77').then(part77Cranes => {
-          console.log(`Loaded ${part77Cranes.length} Part77 cranes`);
-          return part77Cranes;
-        })
-      );
-    } else {
-      console.warn('Failed to fetch Part77 data:', part77Response.status);
-    }
-
-    // Wait for all parsing to complete (parallel parsing in workers)
-    const parsedResults = await Promise.all(parsePromises);
-    parsedResults.forEach(cranes => allCraneData.push(...cranes));
+    let allCraneData = [...(dofCranes || []), ...(part77Cranes || [])];
 
     // Add NOTAM data (already filtered and formatted)
     if (notamCranes.length > 0) {
