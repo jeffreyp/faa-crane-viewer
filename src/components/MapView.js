@@ -1,6 +1,9 @@
 import React, { useEffect, useRef } from 'react';
 import styled from 'styled-components';
 import L from 'leaflet';
+import 'leaflet.markercluster';
+import 'leaflet.markercluster/dist/MarkerCluster.css';
+import 'leaflet.markercluster/dist/MarkerCluster.Default.css';
 import { cranesToGeoJson, RADIUS_NM_TO_METERS } from '../services/faaService';
 import { sanitizeText } from '../utils/sanitize';
 import { CARTO_API_KEY } from '../config';
@@ -78,7 +81,7 @@ const MapContainer = styled.div`
 const MapView = ({ location, radius, cranes, selectedCraneId, onCraneSelect }) => {
   const mapRef = useRef(null);
   const mapInstanceRef = useRef(null);
-  const geojsonLayerRef = useRef(null);
+  const craneLayerRef = useRef(null);
   const circleLayerRef = useRef(null);
   const addressMarkerRef = useRef(null);
 
@@ -162,16 +165,16 @@ const MapView = ({ location, radius, cranes, selectedCraneId, onCraneSelect }) =
   // Update the crane markers when the data changes
   useEffect(() => {
     if (mapInstanceRef.current) {
-      // Remove previous GeoJSON layer if it exists
-      if (geojsonLayerRef.current) {
-        mapInstanceRef.current.removeLayer(geojsonLayerRef.current);
+      // Remove previous crane layer if it exists
+      if (craneLayerRef.current) {
+        mapInstanceRef.current.removeLayer(craneLayerRef.current);
       }
       
       // Convert cranes array to GeoJSON
       const geojson = cranesToGeoJson(cranes);
       
-      // Add new GeoJSON layer
-      geojsonLayerRef.current = L.geoJSON(geojson, {
+      // Build crane markers from GeoJSON
+      const geojsonLayer = L.geoJSON(geojson, {
         pointToLayer: (feature, latlng) => {
           // Use different icons based on data source
           const dataSource = feature.properties.dataSource;
@@ -250,7 +253,14 @@ const MapView = ({ location, radius, cranes, selectedCraneId, onCraneSelect }) =
             }
           });
         }
-      }).addTo(mapInstanceRef.current);
+      });
+
+      // Cluster markers so cranes stacked at the same site (dozens at some
+      // airports) stay reachable; spiderfy fans them out at max zoom
+      craneLayerRef.current = L.markerClusterGroup({
+        showCoverageOnHover: false,
+        chunkedLoading: true
+      }).addLayer(geojsonLayer).addTo(mapInstanceRef.current);
       
       // Make sure the address marker is on top after adding crane markers
       if (addressMarkerRef.current && typeof addressMarkerRef.current.bringToFront === 'function') {
@@ -267,11 +277,11 @@ const MapView = ({ location, radius, cranes, selectedCraneId, onCraneSelect }) =
 
   // Handle selected crane highlighting
   useEffect(() => {
-    if (mapInstanceRef.current && geojsonLayerRef.current && selectedCraneId) {
-      // Find and open the popup for the selected crane
-      geojsonLayerRef.current.eachLayer((layer) => {
+    if (mapInstanceRef.current && craneLayerRef.current && selectedCraneId) {
+      // Find the selected crane, expanding its cluster if needed, and open its popup
+      craneLayerRef.current.eachLayer((layer) => {
         if (layer.craneId === selectedCraneId) {
-          layer.openPopup();
+          craneLayerRef.current.zoomToShowLayer(layer, () => layer.openPopup());
         }
       });
     }
