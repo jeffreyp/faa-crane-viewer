@@ -21,6 +21,8 @@ const MAX_RADIUS_NM = 100;
 // Responses are cached at the edge; coordinates are rounded so nearby searches share entries
 const CACHE_TTL_SECONDS = 300;
 const COORD_PRECISION = 3;
+// Workers send no User-Agent by default, which the FAA's gateway rejects with a 403
+const USER_AGENT = 'FAA-Crane-Viewer/1.0 (+https://jeffreyp.github.io/faa-crane-viewer)';
 
 // Allowed origins - adjust this for your deployment
 const ALLOWED_ORIGINS = [
@@ -124,6 +126,7 @@ async function fetchCraneNotams(env, { lat, lng, radius }) {
   }
 
   if (!response.ok) {
+    await logErrorBody('NMS notams request', response);
     throw new Error(`NMS returned ${response.status}`);
   }
 
@@ -147,7 +150,8 @@ async function nmsGet(env, url) {
     headers: {
       Authorization: `Bearer ${token}`,
       nmsResponseFormat: 'GEOJSON',
-      Accept: 'application/json'
+      Accept: 'application/json',
+      'User-Agent': USER_AGENT
     }
   });
 }
@@ -162,16 +166,21 @@ async function getAccessToken(env) {
   }
 
   const host = env.NMS_HOST || DEFAULT_NMS_HOST;
+  // Trim in case stray whitespace was pasted into the secrets
+  const credentials = `${env.NMS_CLIENT_ID.trim()}:${env.NMS_CLIENT_SECRET.trim()}`;
   const response = await fetch(`${host}/v1/auth/token`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/x-www-form-urlencoded',
-      Authorization: `Basic ${btoa(`${env.NMS_CLIENT_ID}:${env.NMS_CLIENT_SECRET}`)}`
+      Accept: 'application/json',
+      'User-Agent': USER_AGENT,
+      Authorization: `Basic ${btoa(credentials)}`
     },
     body: 'grant_type=client_credentials'
   });
 
   if (!response.ok) {
+    await logErrorBody('NMS token request', response);
     throw new Error(`NMS token request returned ${response.status}`);
   }
 
@@ -185,6 +194,14 @@ async function getAccessToken(env) {
   // Refresh a minute early to avoid using a token that expires mid-request
   cachedTokenExpiresAt = Date.now() + Math.max(expiresInSeconds - 60, 30) * 1000;
   return cachedToken;
+}
+
+/**
+ * Log an upstream error body for `wrangler tail`; it is never returned to the browser
+ */
+async function logErrorBody(label, response) {
+  const body = await response.text().catch(() => '');
+  console.error(`${label} returned ${response.status}: ${body.slice(0, 500)}`);
 }
 
 function jsonResponse(request, body, status) {
