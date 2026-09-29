@@ -2,22 +2,26 @@ name: Update FAA Data
 
 on:
   schedule:
-    # Run daily at 6 AM UTC
+    # Daily at 6 AM UTC: DOF + Part77 CSVs and NOTAMs
     - cron: '0 6 * * *'
-  workflow_dispatch: # Allow manual trigger
-    inputs:
-      force_deploy:
-        description: 'Force deployment even if no data changes'
-        required: false
-        default: 'false'
-        type: boolean
+    # Every 3 hours: NOTAMs only
+    - cron: '30 */3 * * *'
+  workflow_dispatch: # Allow manual trigger (runs everything)
+
+# Every run deploys, and a gh-pages deploy replaces the whole site, so runs must not overlap
+concurrency:
+  group: update-faa-data
+  cancel-in-progress: false
 
 jobs:
   update-data:
     runs-on: ubuntu-latest
-    timeout-minutes: 10  # DOF + Part77 typically complete in 2-3 minutes
+    timeout-minutes: 15  # DOF + Part77 typically complete in 2-3 minutes
     permissions:
       contents: write
+    env:
+      # Refresh the FAA CSVs on the daily schedule and manual runs, not the 3-hourly NOTAM runs
+      FULL_RUN: ${{ github.event_name == 'workflow_dispatch' || github.event.schedule == '0 6 * * *' }}
 
     steps:
     - name: Checkout repository
@@ -35,6 +39,7 @@ jobs:
         
     - name: Download and process FAA data
       id: download-data
+      if: env.FULL_RUN == 'true'
       run: python scripts/update_faa_data.py
 
     - name: Report failure
@@ -58,8 +63,29 @@ jobs:
         echo "   - OEAAA: https://oeaaa.faa.gov/oeaaa/oe3a/main/#/download" >> $GITHUB_STEP_SUMMARY
         echo "3. Review and update scripts/update_faa_data.py if needed" >> $GITHUB_STEP_SUMMARY
 
+    - name: Fetch crane NOTAMs
+      id: notams
+      continue-on-error: true
+      run: python scripts/update_notam_data.py
+      env:
+        NMS_CLIENT_ID: ${{ secrets.NMS_CLIENT_ID }}
+        NMS_CLIENT_SECRET: ${{ secrets.NMS_CLIENT_SECRET }}
+        NMS_HOST: ${{ vars.NMS_HOST }}
+
+    - name: Keep previous NOTAMs on failure
+      if: steps.notams.outcome == 'failure'
+      run: |
+        # notam-cranes.json isn't committed, so reuse the deployed copy (the frontend
+        # drops expired entries) rather than deploying without NOTAMs
+        curl -fsS -o public/data/notam-cranes.json \
+          "https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/data/notam-cranes.json" \
+          || echo '{"generatedAt":null,"cranes":[]}' > public/data/notam-cranes.json
+        echo "## :warning: NOTAM fetch failed" >> $GITHUB_STEP_SUMMARY
+        echo "Deployed the previous NOTAM data instead. Check the 'Fetch crane NOTAMs' step log." >> $GITHUB_STEP_SUMMARY
+
     - name: Check for changes
       id: git-check
+      if: env.FULL_RUN == 'true'
       run: |
         git diff --exit-code public/data/ || echo "changed=true" >> $GITHUB_OUTPUT
 
@@ -106,19 +132,17 @@ jobs:
         fi
         set -e
         
+    # Always deploy: NOTAMs change on every run
     - name: Set up Node.js
-      if: steps.git-check.outputs.changed == 'true' || github.event.inputs.force_deploy == 'true'
       uses: actions/setup-node@v4
       with:
         node-version: '18'
         cache: 'npm'
 
     - name: Install Node.js dependencies
-      if: steps.git-check.outputs.changed == 'true' || github.event.inputs.force_deploy == 'true'
       run: npm ci
 
     - name: Build and deploy to GitHub Pages
-      if: steps.git-check.outputs.changed == 'true' || github.event.inputs.force_deploy == 'true'
       run: |
         git config --local user.email "action@github.com"
         git config --local user.name "GitHub Action"

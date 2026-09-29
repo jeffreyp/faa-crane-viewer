@@ -1,9 +1,0 @@
-name = "faa-notam-proxy"
-main = "notam-proxy.js"
-compatibility_date = "2026-09-01"
-
-[vars]
-# NMS staging (pre-prod). Switch to https://api-nms.aim.faa.gov once the FAA
-# approves production access. NMS_CLIENT_ID / NMS_CLIENT_SECRET are Worker
-# secrets (wrangler secret put) and must never be added here.
-NMS_HOST = "https://api-staging.cgifederal-aim.com"

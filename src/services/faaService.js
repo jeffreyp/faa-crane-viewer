@@ -1,11 +1,11 @@
 // Real FAA crane data parser for CSV files from OE/AAA system
 import Papa from 'papaparse';
-import { NOTAM_PROXY_URL, NOTAM_CONFIG } from '../config';
 import { getCachedDataset, setCachedDataset } from '../utils/cache';
 
 // Constants - using direct absolute path for webpack dev server
 const DOF_CSV_PATH = 'data/datafile.csv';
 const PART77_CSV_PATH = 'data/part77-data.csv';
+const NOTAM_JSON_PATH = 'data/notam-cranes.json';
 
 // Parsed-data cache settings
 // Bump CACHE_VERSION whenever the parsed crane object shape changes
@@ -318,208 +318,28 @@ const parseCSVData = async (csvData) => {
 };
 
 /**
- * Fetch NOTAMs from the Cloudflare Worker proxy, which queries the FAA NOTAM
- * Management Service (NMS) API and returns crane-related GeoJSON features
- * @param {number} lat - Latitude in decimal degrees
- * @param {number} lng - Longitude in decimal degrees
- * @param {number} radiusNM - Search radius in nautical miles
+ * Load active crane NOTAMs. The FAA NOTAM Management Service can't be called from
+ * the browser (it needs OAuth credentials), so a scheduled GitHub Actions job
+ * (scripts/update_notam_data.py) pre-fetches them into a static JSON file.
  * @returns {Promise<Array>} Array of NOTAM crane objects in standard format
  */
-export const fetchNOTAMs = async (lat, lng, radiusNM) => {
-  // Check if NOTAM proxy is configured
-  if (!NOTAM_PROXY_URL) {
-    console.log('NOTAM proxy not configured, skipping NOTAM fetch');
-    return [];
-  }
-
-  const params = new URLSearchParams({
-    lat: lat.toString(),
-    lng: lng.toString(),
-    radius: Math.min(radiusNM, NOTAM_CONFIG.maxRadius).toString()
-  });
-
-  const attempts = NOTAM_CONFIG.retryOnFailure ? NOTAM_CONFIG.maxRetries + 1 : 1;
-
-  for (let attempt = 1; attempt <= attempts; attempt++) {
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), NOTAM_CONFIG.timeout);
-
-    try {
-      console.log(`Fetching NOTAMs from proxy for location: ${lat}, ${lng}, radius: ${radiusNM}nm`);
-
-      const response = await fetch(`${NOTAM_PROXY_URL}?${params}`, {
-        headers: { 'Accept': 'application/json' },
-        signal: controller.signal
-      });
-
-      if (!response.ok) {
-        throw new Error(`NOTAM proxy returned ${response.status}`);
-      }
-
-      const data = await response.json();
-      const features = Array.isArray(data.features) ? data.features : [];
-      console.log(`Received ${features.length} crane-related NOTAMs from proxy`);
-
-      return parseNOTAMFeatures(features);
-    } catch (error) {
-      console.error(`Error fetching NOTAMs (attempt ${attempt}/${attempts}):`, error);
-      if (attempt < attempts) {
-        await new Promise(resolve => setTimeout(resolve, NOTAM_CONFIG.retryDelay));
-      }
-    } finally {
-      clearTimeout(timeoutId);
+const loadNOTAMCranes = async () => {
+  try {
+    const response = await fetch(NOTAM_JSON_PATH, { cache: 'no-cache' });
+    if (!response.ok) {
+      throw new Error(`NOTAM data returned ${response.status}`);
     }
+    const data = await response.json();
+    const cranes = Array.isArray(data.cranes) ? data.cranes : [];
+    console.log(`Loaded ${cranes.length} crane NOTAMs (generated ${data.generatedAt})`);
+
+    // The file can be a few hours old, so drop NOTAMs that have expired since
+    const now = new Date();
+    return cranes.filter(crane => !crane.endTime || new Date(crane.endTime) >= now);
+  } catch (error) {
+    console.warn('NOTAM data unavailable:', error);
+    return []; // Don't fail the entire search if NOTAMs are unavailable
   }
-
-  return []; // Don't fail the entire search if NOTAMs are unavailable
-};
-
-/**
- * Parse an NMS ISO 8601 timestamp (e.g. "2025-03-17T17:02:00.000Z")
- * @param {string} dateStr - ISO timestamp
- * @returns {Date|null} Parsed Date object or null if missing/invalid
- */
-const parseNOTAMDate = (dateStr) => {
-  if (!dateStr || typeof dateStr !== 'string') {
-    return null;
-  }
-  const date = new Date(dateStr);
-  return isNaN(date.getTime()) ? null : date;
-};
-
-/**
- * Format a NOTAM date for display as "YYYY-MM-DD HH:MMZ" (sorts correctly as text)
- */
-const formatNOTAMDate = (date) => (
-  date ? `${date.toISOString().slice(0, 16).replace('T', ' ')}Z` : ''
-);
-
-/**
- * Parse a DMS coordinate pair from NOTAM text, e.g. "474523N1221521W" or
- * "474523.40N 1221521.10W"
- * @returns {{lat: number, lng: number}|null}
- */
-const parseNOTAMTextCoordinates = (text) => {
-  const match = text.match(/(\d{2})(\d{2})(\d{2}(?:\.\d+)?)([NS])\s*(\d{3})(\d{2})(\d{2}(?:\.\d+)?)([EW])/);
-  if (!match) {
-    return null;
-  }
-
-  const [, latD, latM, latS, latDir, lngD, lngM, lngS, lngDir] = match;
-  let lat = parseInt(latD) + parseInt(latM) / 60 + parseFloat(latS) / 3600;
-  let lng = parseInt(lngD) + parseInt(lngM) / 60 + parseFloat(lngS) / 3600;
-  if (latDir === 'S') lat = -lat;
-  if (lngDir === 'W') lng = -lng;
-  return { lat, lng };
-};
-
-/**
- * Get the first Point from a GeoJSON geometry (Point or GeometryCollection)
- * @returns {{lat: number, lng: number}|null}
- */
-const getGeometryPoint = (geometry) => {
-  if (!geometry) {
-    return null;
-  }
-  if (geometry.type === 'Point' && Array.isArray(geometry.coordinates)) {
-    const [lng, lat] = geometry.coordinates;
-    return Number.isFinite(lat) && Number.isFinite(lng) ? { lat, lng } : null;
-  }
-  if (geometry.type === 'GeometryCollection' && Array.isArray(geometry.geometries)) {
-    for (const child of geometry.geometries) {
-      const point = getGeometryPoint(child);
-      if (point) {
-        return point;
-      }
-    }
-  }
-  return null;
-};
-
-/**
- * Filter NMS GeoJSON NOTAM features to active crane obstructions and convert
- * them to the standard crane record shape
- * @param {Array} features - GeoJSON features from the NMS API
- * @returns {Array} Array of crane objects in standard format
- */
-const parseNOTAMFeatures = (features) => {
-  const now = new Date();
-
-  const craneFeatures = features.filter(feature => {
-    const notam = feature?.properties?.coreNOTAMData?.notam;
-    if (!notam) {
-      return false;
-    }
-
-    const message = (notam.text || '').toLowerCase();
-
-    // Obstruction NOTAMs use Q-codes starting with QOB (e.g. QOBCE, obstacle erected)
-    const isObstruction = (notam.selectionCode || '').toUpperCase().startsWith('QOB') ||
-                          message.includes('obst');
-    const isCrane = message.includes('crane');
-
-    if (!isObstruction || !isCrane) {
-      return false;
-    }
-
-    // Filter for currently active NOTAMs based on start/end/cancelation dates
-    const startDate = parseNOTAMDate(notam.effectiveStart);
-    const endDate = parseNOTAMDate(notam.effectiveEnd);
-    const cancelationDate = parseNOTAMDate(notam.cancelationDate);
-
-    if (startDate && startDate > now) {
-      return false;
-    }
-    if (endDate && endDate < now) {
-      return false;
-    }
-    if (cancelationDate && cancelationDate < now) {
-      return false;
-    }
-
-    return true;
-  });
-
-  console.log(`Filtered to ${craneFeatures.length} crane-related NOTAMs (currently active)`);
-
-  return craneFeatures.map(feature => {
-    const notam = feature.properties.coreNOTAMData.notam;
-    // Example text: "OBST CRANE (ASN 2024-ANM-1234-NRA) 474523N1221521W (0.4NM SE S60) 450FT (230FT AGL) FLAGGED AND LGT"
-    const message = notam.text || '';
-
-    // The coordinates in the NOTAM text are the crane itself; the geometry may be
-    // the NOTAM's reference point, so it's only a fallback
-    const position = parseNOTAMTextCoordinates(message) || getGeometryPoint(feature.geometry);
-
-    // Parse height (extract from "XXX FT AGL" or "(XXXFT AGL)")
-    const heightMatch = message.match(/\((\d+)\s*FT AGL\)|(\d+)\s*FT AGL/i);
-    const height = heightMatch ? parseInt(heightMatch[1] || heightMatch[2]) : 0;
-
-    const startDate = formatNOTAMDate(parseNOTAMDate(notam.effectiveStart));
-    const endDate = formatNOTAMDate(parseNOTAMDate(notam.effectiveEnd)) || 'UNKNOWN';
-
-    const location = notam.location || notam.icaoLocation || '';
-    const notamNumber = notam.number ? `${location} ${notam.number}`.trim() : notam.id;
-
-    return {
-      id: notamNumber,
-      uniqueId: `${notam.id || notamNumber}-NOTAM`,
-      structureType: 'Crane',
-      latitude: position ? position.lat : 0,
-      longitude: position ? position.lng : 0,
-      height: height,
-      heightUnit: 'ft AGL',
-      status: 'Active NOTAM',
-      startDate: startDate,
-      endDate: endDate,
-      sponsor: location,
-      city: location,
-      state: '',
-      dataSource: 'NOTAM',
-      condition: message,
-      icaoLocation: notam.icaoLocation || location
-    };
-  }).filter(crane => crane.latitude !== 0 && crane.longitude !== 0);
 };
 
 // Drop cranes whose end date has passed. Cached data can be up to a day old,
@@ -641,7 +461,7 @@ const loadDatasetOnce = (path, label) => {
   return inflightLoads.get(path);
 };
 
-// Fetch crane data from DOF, Part77 CSV files and on-demand NOTAMs
+// Fetch crane data from DOF, Part77 CSV files and pre-fetched NOTAMs
 export const fetchCraneData = async (location, radiusNM) => {
   try {
     console.log('Fetching crane data from DOF, Part77, and NOTAM sources...');
@@ -650,7 +470,7 @@ export const fetchCraneData = async (location, radiusNM) => {
     const [dofResult, part77Result, notamCranes] = await Promise.all([
       loadDatasetOnce(DOF_CSV_PATH, 'DOF'),
       loadDatasetOnce(PART77_CSV_PATH, 'Part77'),
-      location && NOTAM_PROXY_URL ? fetchNOTAMs(location.lat, location.lng, radiusNM) : []
+      loadNOTAMCranes()
     ]);
 
     if (!dofResult && !part77Result) {
@@ -663,7 +483,7 @@ export const fetchCraneData = async (location, radiusNM) => {
     const staleTimes = [dofResult?.staleSince, part77Result?.staleSince].filter(Boolean);
     const staleDataAsOf = staleTimes.length > 0 ? new Date(Math.min(...staleTimes)) : null;
 
-    // Add NOTAM data (already filtered and formatted)
+    // Add NOTAM data (already formatted)
     if (notamCranes.length > 0) {
       console.log(`Adding ${notamCranes.length} NOTAM cranes`);
       allCraneData.push(...notamCranes);
@@ -683,15 +503,9 @@ export const fetchCraneData = async (location, radiusNM) => {
     allCraneData = Array.from(uniqueCranes.values());
     console.log(`After deduplication: ${allCraneData.length} unique cranes`);
 
-    // Filter data based on location and radius (DOF/Part77 only, NOTAMs already filtered)
+    // Filter data based on location and radius
     if (location && radiusNM) {
-      allCraneData = allCraneData.filter(crane => {
-        // Skip filtering for NOTAMs as they're already filtered by the API
-        if (crane.dataSource === 'NOTAM') {
-          return true;
-        }
-        return isPointWithinRadius(location, crane, radiusNM);
-      });
+      allCraneData = allCraneData.filter(crane => isPointWithinRadius(location, crane, radiusNM));
       console.log(`Filtered to ${allCraneData.length} cranes within ${radiusNM}nm radius`);
     }
 

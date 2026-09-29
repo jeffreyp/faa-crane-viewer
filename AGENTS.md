@@ -10,22 +10,29 @@ Live: https://jeffreyp.github.io/faa-crane-viewer (GitHub Pages, no backend)
 npm start                             # dev server, localhost:3000
 CARTO_API_KEY=... npm run build       # production build -> public/bundle.js
 python3 scripts/update_faa_data.py    # refresh public/data/ (needs requests, pandas)
+NMS_CLIENT_ID=... NMS_CLIENT_SECRET=... python3 scripts/update_notam_data.py  # refresh public/data/notam-cranes.json
 ```
 
 There is no test suite (`npm test` is a stub). Verify changes by running `npm start` and doing a search.
 
 ## Architecture
 
-- **Data refresh:** `.github/workflows/update-faa-data.yml` runs daily at 06:00 UTC. It runs `scripts/update_faa_data.py`, commits changed CSVs to `main`, builds, and deploys `public/` with `gh-pages`.
+- **Data refresh:** `.github/workflows/update-faa-data.yml` runs daily at 06:00 UTC and every 3 hours at :30. The daily run (and manual runs) also runs `scripts/update_faa_data.py` and commits changed CSVs to `main`. Every run fetches NOTAMs, builds, and deploys `public/` with `gh-pages`.
 - **Sources:**
   - **Part 77 (OE/AAA):** per-region downloads for the 9 FAA regions (AAL, ACE, AEA, AGL, ANE, ANM, ASO, ASW, AWP). Filtered for crane/construction keywords. Almost all records come from here.
   - **DOF (Digital Obstacle File):** filtered for crane/mobile equipment, DMS converted to decimal. Contributes only a few hundred records.
+  - **NOTAMs (NMS API):** `scripts/update_notam_data.py` downloads the bulk file of active DOMESTIC NOTAMs, keeps active crane obstructions, and writes `public/data/notam-cranes.json` in the frontend's record shape.
 - **Output:** `public/data/part77-data.csv` (Part 77 only), `public/data/datafile.csv` (Part 77 + DOF, deduped on ASN), and raw per-region files in `public/data/regions/`.
-- **Frontend:** `src/services/faaService.js` fetches both CSVs, parses them with PapaParse (in a Web Worker, `src/workers/csvParser.worker.js`, with a main-thread fallback), filters by Haversine distance in nautical miles, and dedupes. `src/App.js` orchestrates; `MapView`, `TableView`, and `SearchBar` are in `src/components/`. `src/utils/sanitize.js` sanitizes popup HTML with DOMPurify.
+- **Frontend:** `src/services/faaService.js` fetches both CSVs and the NOTAM JSON, parses them with PapaParse (in a Web Worker, `src/workers/csvParser.worker.js`, with a main-thread fallback), filters by Haversine distance in nautical miles, and dedupes. `src/App.js` orchestrates; `MapView`, `TableView`, and `SearchBar` are in `src/components/`. `src/utils/sanitize.js` sanitizes popup HTML with DOMPurify.
 
-### NOTAMs: disabled
+### NOTAMs
 
-NOTAM support (`fetchNOTAMs` in `faaService.js`, proxied through `cloudflare-worker/notam-proxy.js`) is turned off. `NOTAM_PROXY_URL = null` in `src/config.js`. The FAA retired the legacy `notamSearch` endpoint in April 2026. Re-enabling requires NMS API credentials and migrating the worker and client; this is tracked in beads epic `fcv-gyi`. Don't treat NOTAM code or docs (including `DEPLOYMENT.md` and `cloudflare-worker/DEPLOYMENT.md`) as describing working behavior.
+NOTAMs come from the FAA NOTAM Management Service (NMS) API, which uses OAuth2 client credentials. NMS rejects requests from Cloudflare Workers, so NOTAMs are pre-fetched in CI rather than proxied on demand.
+
+- Credentials are the `NMS_CLIENT_ID` and `NMS_CLIENT_SECRET` repo secrets (the KEY and SECRET from the FAA's NMS onboarding spreadsheet). Never commit them.
+- The `NMS_HOST` repo variable selects the environment. It defaults to staging (`https://api-staging.cgifederal-aim.com`); production (`https://api-nms.aim.faa.gov`) requires FAA sign-off and its own credentials.
+- `public/data/notam-cranes.json` is gitignored and exists only in deployments. If the fetch fails, the workflow redeploys the previous file. The frontend drops entries whose `endTime` has passed.
+- Tracked in beads epic `fcv-gyi`.
 
 ## Data contract
 
