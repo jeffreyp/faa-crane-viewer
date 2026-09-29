@@ -14,7 +14,7 @@ The application aggregates crane data from FAA sources:
 - **Part 77 Regional Data** - Aeronautical impact assessments from 9 FAA regions (updated daily)
 - **NOTAMs (Notices to Airmen)** - Temporary crane obstructions (updated every 3 hours). **Test data only, not live: see the warning above.**
 
-See [demo page](https://jeffreyp.github.io/faa-crane-viewer). 
+Click [Construction Crane Viewer](https://jeffreyp.github.io/faa-crane-viewer)!
 
 ## Features
 
