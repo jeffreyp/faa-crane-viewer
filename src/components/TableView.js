@@ -130,8 +130,17 @@ const TableView = ({ cranes, loading, selectedCraneId, onCraneSelect }) => {
     }
   };
   
-  // Sort the cranes array
+  // Sort the cranes array, keeping NOTAMs at the top (unless sorting by source)
+  // so they don't end up buried below dozens of Part 77 rows
   const sortedCranes = [...cranes].sort((a, b) => {
+    if (sortField !== 'dataSource') {
+      const aIsNOTAM = a.dataSource === 'NOTAM';
+      const bIsNOTAM = b.dataSource === 'NOTAM';
+      if (aIsNOTAM !== bIsNOTAM) {
+        return aIsNOTAM ? -1 : 1;
+      }
+    }
+
     const aValue = a[sortField];
     const bValue = b[sortField];
     

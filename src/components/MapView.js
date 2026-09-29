@@ -82,6 +82,7 @@ const MapView = ({ location, radius, cranes, selectedCraneId, onCraneSelect }) =
   const mapRef = useRef(null);
   const mapInstanceRef = useRef(null);
   const craneLayerRef = useRef(null);
+  const notamLayerRef = useRef(null);
   const circleLayerRef = useRef(null);
   const addressMarkerRef = useRef(null);
 
@@ -94,7 +95,15 @@ const MapView = ({ location, radius, cranes, selectedCraneId, onCraneSelect }) =
       L.tileLayer(`https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png${tileKeyParam}`, {
         attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>'
       }).addTo(map);
-      
+
+      // Layering, bottom to top: address star (590), single crane markers (markerPane, 600),
+      // NOTAMs (650), crane clusters (660), popups (700). NOTAMs cover the Part 77 markers
+      // they usually share coordinates with, but never block clicks on a cluster; the star
+      // sits lowest so it doesn't block a cluster at the search point either.
+      map.createPane('addressPane').style.zIndex = 590;
+      map.createPane('notamPane').style.zIndex = 650;
+      map.createPane('craneClusterPane').style.zIndex = 660;
+
       mapInstanceRef.current = map;
       
       // Handle resize events
@@ -131,9 +140,9 @@ const MapView = ({ location, radius, cranes, selectedCraneId, onCraneSelect }) =
         mapInstanceRef.current.removeLayer(addressMarkerRef.current);
       }
       
-      addressMarkerRef.current = L.marker([location.lat, location.lng], { 
+      addressMarkerRef.current = L.marker([location.lat, location.lng], {
         icon: starIcon,
-        zIndexOffset: 1000 // Ensure the star is on top of other markers
+        pane: 'addressPane'
       }).addTo(mapInstanceRef.current);
       
       // Add popup with address information (sanitized to prevent XSS)
@@ -165,9 +174,12 @@ const MapView = ({ location, radius, cranes, selectedCraneId, onCraneSelect }) =
   // Update the crane markers when the data changes
   useEffect(() => {
     if (mapInstanceRef.current) {
-      // Remove previous crane layer if it exists
+      // Remove previous crane and NOTAM layers if they exist
       if (craneLayerRef.current) {
         mapInstanceRef.current.removeLayer(craneLayerRef.current);
+      }
+      if (notamLayerRef.current) {
+        mapInstanceRef.current.removeLayer(notamLayerRef.current);
       }
       
       // Convert cranes array to GeoJSON
@@ -178,8 +190,10 @@ const MapView = ({ location, radius, cranes, selectedCraneId, onCraneSelect }) =
         pointToLayer: (feature, latlng) => {
           // Use different icons based on data source
           const dataSource = feature.properties.dataSource;
-          const icon = dataSource === 'NOTAM' ? notamIcon : craneIcon;
-          return L.marker(latlng, { icon: icon });
+          if (dataSource === 'NOTAM') {
+            return L.marker(latlng, { icon: notamIcon, pane: 'notamPane' });
+          }
+          return L.marker(latlng, { icon: craneIcon });
         },
         onEachFeature: (feature, layer) => {
           const props = feature.properties;
@@ -259,17 +273,22 @@ const MapView = ({ location, radius, cranes, selectedCraneId, onCraneSelect }) =
       });
 
       // Cluster markers so cranes stacked at the same site (dozens at some
-      // airports) stay reachable; spiderfy fans them out at max zoom
+      // airports) stay reachable; spiderfy fans them out at max zoom.
+      // NOTAMs stay unclustered so they're always visible: most share coordinates
+      // with a Part 77 record and would otherwise stay hidden in a cluster.
+      const craneMarkers = [];
+      const notamMarkers = [];
+      geojsonLayer.eachLayer(layer => {
+        (layer.feature.properties.dataSource === 'NOTAM' ? notamMarkers : craneMarkers).push(layer);
+      });
+
       craneLayerRef.current = L.markerClusterGroup({
         showCoverageOnHover: false,
-        chunkedLoading: true
-      }).addLayer(geojsonLayer).addTo(mapInstanceRef.current);
-      
-      // Make sure the address marker is on top after adding crane markers
-      if (addressMarkerRef.current && typeof addressMarkerRef.current.bringToFront === 'function') {
-        addressMarkerRef.current.bringToFront();
-      }
-      
+        chunkedLoading: true,
+        clusterPane: 'craneClusterPane'
+      }).addLayers(craneMarkers).addTo(mapInstanceRef.current);
+      notamLayerRef.current = L.layerGroup(notamMarkers).addTo(mapInstanceRef.current);
+
       // Only fit bounds when cranes data first loads, not on every update
       // Center on the search location to keep the star fixed
       if (cranes.length > 0 && circleLayerRef.current) {
@@ -285,6 +304,13 @@ const MapView = ({ location, radius, cranes, selectedCraneId, onCraneSelect }) =
       craneLayerRef.current.eachLayer((layer) => {
         if (layer.craneId === selectedCraneId) {
           craneLayerRef.current.zoomToShowLayer(layer, () => layer.openPopup());
+        }
+      });
+
+      // NOTAMs aren't clustered, so just open the popup (Leaflet pans to fit it)
+      notamLayerRef.current?.eachLayer((layer) => {
+        if (layer.craneId === selectedCraneId) {
+          layer.openPopup();
         }
       });
     }
