@@ -4,6 +4,7 @@ import MapView from './components/MapView';
 import TableView from './components/TableView';
 import SearchBar from './components/SearchBar';
 import { fetchCraneData } from './services/faaService';
+import { NOTAM_TEST_WARNING } from './config';
 import { geocodeAddress, formatDisplayAddress, isWithinContinentalUS } from './services/geocodingService';
 
 const AppContainer = styled.div`
@@ -25,6 +26,15 @@ const Header = styled.header`
 const Title = styled.h1`
   margin: 0;
   font-size: 1.5rem;
+`;
+
+const NotamTestBanner = styled.div`
+  background-color: #B71C1C;
+  color: white;
+  font-weight: bold;
+  font-size: 1rem;
+  text-align: center;
+  padding: 0.6rem 1rem;
 `;
 
 const ViewsContainer = styled.div`
@@ -161,6 +171,7 @@ const App = () => {
           onFilterChange={handleFilterToggle}
         />
       </Header>
+      <NotamTestBanner role="alert">⚠️ WARNING: {NOTAM_TEST_WARNING}</NotamTestBanner>
       {error && <div style={{
         color: error.startsWith('Warning:') ? 'orange' : 'red',
         backgroundColor: error.startsWith('Warning:') ? '#FFF8E1' : '#FFEBEE',

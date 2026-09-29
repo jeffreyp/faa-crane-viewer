@@ -15,6 +15,15 @@
 export const CARTO_API_KEY = process.env.CARTO_API_KEY || '';
 
 /**
+ * NOTAMs currently come from the FAA NMS staging environment while the integration is
+ * tested, so they aren't live data. Shown in the site banner and NOTAM popups; remove
+ * once NOTAMs come from NMS production (tracked in beads epic fcv-gyi).
+ */
+export const NOTAM_TEST_WARNING =
+  'NOTAM data is being tested with the new FAA NOTAM Management Service (NMS). ' +
+  'It is NOT production/live data and cannot be trusted. Do not use it for flight planning or safety decisions.';
+
+/**
  * Data source configuration
  */
 export const DATA_SOURCES = {

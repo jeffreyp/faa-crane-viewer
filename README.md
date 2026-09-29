@@ -2,14 +2,17 @@
 
 ![DOF Data](https://img.shields.io/badge/DOF-Daily%20Updates-blue?logo=data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCI+PHBhdGggZmlsbD0id2hpdGUiIGQ9Ik0xMiAyQzYuNDggMiAyIDYuNDggMiAxMnM0LjQ4IDEwIDEwIDEwIDEwLTQuNDggMTAtMTBTMTcuNTIgMiAxMiAyem0tMiAxNWwtNS01IDEuNDEtMS40MUwxMCAxNC4xN2w3LjU5LTcuNTlMMTkgOGwtOSA5eiIvPjwvc3ZnPg==)
 ![OEAAA Data](https://img.shields.io/badge/OEAAA-Daily%20Updates-green?logo=data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCI+PHBhdGggZmlsbD0id2hpdGUiIGQ9Ik0xMiAyQzYuNDggMiAyIDYuNDggMiAxMnM0LjQ4IDEwIDEwIDEwIDEwLTQuNDggMTAtMTBTMTcuNTIgMiAxMiAyem0tMiAxNWwtNS01IDEuNDEtMS40MUwxMCAxNC4xN2w3LjU5LTcuNTlMMTkgOGwtOSA5eiIvPjwvc3ZnPg==)
-![NOTAM Data](https://img.shields.io/badge/NOTAM-Every%203%20Hours-orange?logo=data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCI+PHBhdGggZmlsbD0id2hpdGUiIGQ9Ik0xMiAyQzYuNDggMiAyIDYuNDggMiAxMnM0LjQ4IDEwIDEwIDEwIDEwLTQuNDggMTAtMTBTMTcuNTIgMiAxMiAyem0tMiAxNWwtNS01IDEuNDEtMS40MUwxMCAxNC4xN2w3LjU5LTcuNTlMMTkgOGwtOSA5eiIvPjwvc3ZnPg==)
+![NOTAM Data](https://img.shields.io/badge/NOTAM-Test%20Data%20(Not%20Live)-red?logo=data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCI+PHBhdGggZmlsbD0id2hpdGUiIGQ9Ik0xMiAyQzYuNDggMiAyIDYuNDggMiAxMnM0LjQ4IDEwIDEwIDEwIDEwLTQuNDggMTAtMTBTMTcuNTIgMiAxMiAyem0tMiAxNWwtNS01IDEuNDEtMS40MUwxMCAxNC4xN2w3LjU5LTcuNTlMMTkgOGwtOSA5eiIvPjwvc3ZnPg==)
+
+> [!CAUTION]
+> **NOTAM data is being tested with the new FAA NOTAM Management Service (NMS). It is NOT production/live data and cannot be trusted. Do not use it for flight planning or safety decisions.**
 
 An entirely vibe-coded web application that displays construction cranes within a user-specified nautical mile radius of a US address/location.
 
 The application aggregates crane data from FAA sources:
 - **DOF (Digital Obstacle File)** - Permanent crane structures nationwide (updated daily)
 - **Part 77 Regional Data** - Aeronautical impact assessments from 9 FAA regions (updated daily)
-- **NOTAMs (Notices to Airmen)** - Temporary crane obstructions (updated every 3 hours)
+- **NOTAMs (Notices to Airmen)** - Temporary crane obstructions (updated every 3 hours). **Test data only, not live: see the warning above.**
 
 See [demo page](https://jeffreyp.github.io/faa-crane-viewer). 
 
@@ -123,6 +126,9 @@ The DOF is the FAA's master database of verified obstacles. It includes permanen
 Part 77 data includes structures that have been evaluated for their aeronautical impact. This includes construction cranes that have gone through the airspace impact review process.
 
 ### 3. NOTAMs (Notices to Airmen)
+
+> [!CAUTION]
+> **NOTAMs currently come from the NMS staging (test) environment. They are NOT production/live data and cannot be trusted.** The site shows this warning in a banner, in every NOTAM popup, and on NOTAM table badges. Remove those warnings (`NOTAM_TEST_WARNING` in `src/config.js`) only after switching `NMS_HOST` to production.
 
 **Source:** FAA NOTAM Management Service (NMS) API
 **Update Frequency:** Every 3 hours

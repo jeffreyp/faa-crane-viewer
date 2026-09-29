@@ -32,6 +32,7 @@ NOTAMs come from the FAA NOTAM Management Service (NMS) API, which uses OAuth2 c
 - Credentials are the `NMS_CLIENT_ID` and `NMS_CLIENT_SECRET` repo secrets (the KEY and SECRET from the FAA's NMS onboarding spreadsheet). Never commit them.
 - The `NMS_HOST` repo variable selects the environment. It defaults to staging (`https://api-staging.cgifederal-aim.com`); production (`https://api-nms.aim.faa.gov`) requires FAA sign-off and its own credentials.
 - `public/data/notam-cranes.json` is gitignored and exists only in deployments. If the fetch fails, the workflow redeploys the previous file. The frontend drops entries whose `endTime` has passed.
+- **NOTAM data is test data from NMS staging, NOT production/live data, and cannot be trusted.** The site says so in a banner, NOTAM popups, the NOTAM filter label, and NOTAM table badges; the text is `NOTAM_TEST_WARNING` in `src/config.js`. Keep these warnings until `NMS_HOST` points at production, and never describe NOTAMs as live or authoritative in docs or UI.
 - Tracked in beads epic `fcv-gyi`.
 
 ## Data contract
