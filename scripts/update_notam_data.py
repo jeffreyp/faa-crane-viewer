@@ -72,9 +72,10 @@ def download_domestic_notams(session, host, token):
         # Pre-signed storage URL; it must not carry our bearer token
         content = session.get(content_url, timeout=300)
     else:
-        content = session.get(f'{host}/nmsapi{content_url}', headers=auth_headers, timeout=300)
+        # The relative path already starts with /nmsapi
+        content = session.get(f'{host}{content_url}', headers=auth_headers, timeout=300)
     if not content.ok:
-        raise RuntimeError(f'NMS content download returned {content.status_code}')
+        raise RuntimeError(f'NMS content download returned {content.status_code}: {content.text[:300]}')
 
     raw = content.content
     if raw[:2] == b'\x1f\x8b':
