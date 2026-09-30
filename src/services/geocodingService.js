@@ -39,6 +39,7 @@ const PREDEFINED_LOCATIONS = {
 
 // Base URL for Nominatim geocoding service (fallback)
 const NOMINATIM_BASE_URL = 'https://nominatim.openstreetmap.org/search';
+const NOMINATIM_REVERSE_URL = 'https://nominatim.openstreetmap.org/reverse';
 
 // Rate limiting: Track requests to avoid overwhelming the service
 let lastRequestTime = 0;
@@ -57,6 +58,55 @@ const rateLimit = async () => {
   lastRequestTime = Date.now();
 };
 
+const COORDINATE_PATTERN = /^(-?\d{1,2}(?:\.\d+)?)\s*,\s*(-?\d{1,3}(?:\.\d+)?)$/;
+
+export const formatCoordinates = (latitude, longitude) =>
+  `${latitude.toFixed(5)}, ${longitude.toFixed(5)}`;
+
+// Turn coordinates into a display address. Falls back to the coordinates themselves,
+// which geocodeAddress accepts, so the result can always be searched again.
+export const reverseGeocode = async (latitude, longitude) => {
+  await rateLimit();
+
+  try {
+    const params = new URLSearchParams({
+      lat: String(latitude),
+      lon: String(longitude),
+      format: 'json',
+      addressdetails: '1',
+      'accept-language': 'en'
+    });
+    const response = await fetch(`${NOMINATIM_REVERSE_URL}?${params}`, {
+      // Don't hold up the initial search if Nominatim is slow
+      signal: typeof AbortSignal.timeout === 'function' ? AbortSignal.timeout(5000) : undefined
+    });
+    if (!response.ok) {
+      throw new Error(`Reverse geocoding returned ${response.status}`);
+    }
+    const result = await response.json();
+    const address = formatDisplayAddress(sanitizeGeocodeResult({
+      latitude,
+      longitude,
+      displayName: '',
+      address: {
+        house_number: result.address?.house_number || '',
+        road: result.address?.road || '',
+        city: result.address?.city || result.address?.town || result.address?.village || '',
+        state: result.address?.state || '',
+        postcode: result.address?.postcode || ''
+      }
+    }));
+    if (!address) {
+      throw new Error('No address found at these coordinates');
+    }
+    // validateAddress throws on characters it rejects, so the result can be searched again
+    return validateAddress(address);
+  } catch (error) {
+    console.warn('Reverse geocoding failed, using coordinates:', error);
+    return formatCoordinates(latitude, longitude);
+  }
+};
+
 // Geocode an address within the United States
 export const geocodeAddress = async (address) => {
   // Validate and sanitize input to prevent XSS
@@ -67,7 +117,21 @@ export const geocodeAddress = async (address) => {
     throw new Error(`Invalid address: ${error.message}`);
   }
 
-  // First, try to match against predefined locations
+  // Accept raw "lat, lng" coordinates (also the fallback text for the user's location)
+  const coordinateMatch = validatedAddress.match(COORDINATE_PATTERN);
+  if (coordinateMatch) {
+    const latitude = parseFloat(coordinateMatch[1]);
+    const longitude = parseFloat(coordinateMatch[2]);
+    return sanitizeGeocodeResult({
+      latitude,
+      longitude,
+      displayName: formatCoordinates(latitude, longitude),
+      address: {},
+      confidence: 1.0
+    });
+  }
+
+  // Next, try to match against predefined locations
   const normalizedAddress = validatedAddress.toLowerCase().trim();
   let predefinedMatch = PREDEFINED_LOCATIONS[normalizedAddress];
   

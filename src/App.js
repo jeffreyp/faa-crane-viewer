@@ -1,11 +1,19 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import styled from 'styled-components';
 import MapView from './components/MapView';
 import TableView from './components/TableView';
 import SearchBar from './components/SearchBar';
 import { fetchCraneData } from './services/faaService';
 import { NOTAM_DISCLAIMER } from './config';
-import { geocodeAddress, formatDisplayAddress, isWithinContinentalUS } from './services/geocodingService';
+import { geocodeAddress, formatDisplayAddress, isWithinContinentalUS, reverseGeocode } from './services/geocodingService';
+import { getGeolocationPermission, getCurrentPosition } from './utils/geolocation';
+import { loadRecentSearches, addRecentSearch, removeRecentSearch } from './utils/recentSearches';
+
+const DEFAULT_LOCATION = {
+  lat: 33.448037, // Southeast corner of S 107th Ave and W Van Buren St
+  lng: -112.285957,
+  address: "10601 W Van Buren St, Tolleson, AZ 85353"
+};
 
 const AppContainer = styled.div`
   display: flex;
@@ -52,11 +60,7 @@ const App = () => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [selectedCraneId, setSelectedCraneId] = useState(null);
-  const [location, setLocation] = useState({
-    lat: 33.448037, // Southeast corner of S 107th Ave and W Van Buren St
-    lng: -112.285957,
-    address: "10601 W Van Buren St, Tolleson, AZ 85353"
-  });
+  const [location, setLocation] = useState(DEFAULT_LOCATION);
   const [radius, setRadius] = useState(10); // 10 nautical miles
   const [dataSourceFilters, setDataSourceFilters] = useState({
     dof: true,
@@ -64,9 +68,63 @@ const App = () => {
     notam: true
   });
 
+  const [recentSearches, setRecentSearches] = useState(loadRecentSearches);
+  // Set to { value } when geolocation fills in the address box
+  const [locatedAddress, setLocatedAddress] = useState(null);
+  // Once the user runs a search, a slow geolocation result must not replace it
+  const userSearchedRef = useRef(false);
+
+  // Start at the user's location if they allow it, otherwise at the default location.
   useEffect(() => {
-    searchCranes(location, radius);
+    const init = async () => {
+      const permission = await getGeolocationPermission();
+      if (permission === 'denied') {
+        searchCranes(DEFAULT_LOCATION, radius);
+        return;
+      }
+      // Show the default location while the browser asks for permission
+      if (permission !== 'granted') {
+        searchCranes(DEFAULT_LOCATION, radius);
+      }
+      const found = await locateUser(false);
+      if (!found && permission === 'granted') {
+        searchCranes(DEFAULT_LOCATION, radius);
+      }
+    };
+    init();
   }, []);
+
+  // Search around the user's position. Returns true if a search ran. Errors are
+  // shown only when the user asked for their location (not on page load).
+  const locateUser = async (userInitiated) => {
+    if (userInitiated) {
+      userSearchedRef.current = true;
+      setLoading(true);
+      setError(null);
+    }
+    try {
+      const position = await getCurrentPosition();
+      if (!isWithinContinentalUS(position.lat, position.lng)) {
+        throw new Error('Your location is outside the continental United States.');
+      }
+      const address = await reverseGeocode(position.lat, position.lng);
+      if (!userInitiated && userSearchedRef.current) {
+        return false;
+      }
+      const newLocation = { ...position, address };
+      setLocation(newLocation);
+      setLocatedAddress({ value: address });
+      await searchCranes(newLocation, radius);
+      return true;
+    } catch (err) {
+      console.warn('Geolocation failed:', err);
+      if (userInitiated) {
+        setError(err.message);
+        setLoading(false);
+      }
+      return false;
+    }
+  };
 
   const searchCranes = async (location, radius) => {
     setLoading(true);
@@ -94,6 +152,7 @@ const App = () => {
 
   const handleSearch = async (address, radius) => {
     console.log('Search initiated:', { address, radius });
+    userSearchedRef.current = true;
     setLoading(true);
     setError(null);
 
@@ -117,6 +176,7 @@ const App = () => {
 
       setLocation(newLocation);
       setRadius(radius);
+      setRecentSearches(addRecentSearch(address));
 
       // Search for cranes at the new location
       await searchCranes(newLocation, radius);
@@ -163,9 +223,13 @@ const App = () => {
       <Header>
         <Title>FAA Construction Crane Viewer</Title>
         <SearchBar
-          defaultAddress="10601 W Van Buren St, Tolleson, AZ 85353"
+          defaultAddress={DEFAULT_LOCATION.address}
           defaultRadius={radius}
+          locatedAddress={locatedAddress}
+          recentSearches={recentSearches}
+          onRemoveRecentSearch={(address) => setRecentSearches(removeRecentSearch(address))}
           onSearch={handleSearch}
+          onLocate={() => locateUser(true)}
           loading={loading}
           dataSourceFilters={dataSourceFilters}
           onFilterChange={handleFilterToggle}

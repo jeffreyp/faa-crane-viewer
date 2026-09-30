@@ -1,4 +1,5 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
+import { filterRecentSearches } from '../utils/recentSearches';
 import styled from 'styled-components';
 
 const SearchContainer = styled.div`
@@ -12,21 +13,123 @@ const SearchContainer = styled.div`
   }
 `;
 
-const Input = styled.input`
+const AddressField = styled.div`
+  position: relative;
   flex: 1;
-  padding: 0.75rem;
-  border: 1px solid #ccc;
-  border-radius: 4px;
-  font-size: 1rem;
   min-width: 300px;
   margin-right: 1rem;
-  
+
   @media (max-width: 768px) {
     margin-right: 0;
     margin-bottom: 0.5rem;
     min-width: auto;
   }
 `;
+
+const Input = styled.input`
+  width: 100%;
+  box-sizing: border-box;
+  padding: 0.75rem 2.75rem 0.75rem 0.75rem;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  font-size: 1rem;
+`;
+
+const LocateButton = styled.button`
+  position: absolute;
+  top: 50%;
+  right: 0.35rem;
+  transform: translateY(-50%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 2rem;
+  height: 2rem;
+  padding: 0;
+  background: none;
+  border: none;
+  border-radius: 4px;
+  color: #003366;
+  cursor: pointer;
+
+  &:hover {
+    background-color: #e8eef5;
+  }
+
+  &:disabled {
+    color: #aaa;
+    cursor: not-allowed;
+    background: none;
+  }
+`;
+
+const RecentList = styled.ul`
+  position: absolute;
+  top: calc(100% + 2px);
+  left: 0;
+  right: 0;
+  z-index: 2000; /* above Leaflet panes and controls */
+  margin: 0;
+  padding: 0.25rem 0;
+  list-style: none;
+  background: white;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+  max-height: 20rem;
+  overflow-y: auto;
+`;
+
+const RecentHeading = styled.li`
+  padding: 0.25rem 0.75rem;
+  font-size: 0.75rem;
+  color: #666;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+`;
+
+const RecentItem = styled.li`
+  display: flex;
+  align-items: center;
+  padding: 0.5rem 0.75rem;
+  color: #222;
+  cursor: pointer;
+  background-color: ${props => (props.$active ? '#e8eef5' : 'transparent')};
+
+  &:hover {
+    background-color: #e8eef5;
+  }
+
+  span {
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+`;
+
+const RemoveButton = styled.button`
+  margin-left: 0.5rem;
+  padding: 0 0.35rem;
+  background: none;
+  border: none;
+  color: #888;
+  font-size: 1.1rem;
+  line-height: 1;
+  cursor: pointer;
+
+  &:hover {
+    color: #c62828;
+  }
+`;
+
+const LocateIcon = () => (
+  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+    <circle cx="12" cy="12" r="7" />
+    <circle cx="12" cy="12" r="2.5" fill="currentColor" />
+    <path d="M12 1v4M12 19v4M1 12h4M19 12h4" />
+  </svg>
+);
 
 const RadiusContainer = styled.div`
   display: flex;
@@ -106,13 +209,91 @@ const FilterTitle = styled.span`
   margin-right: 0.5rem;
 `;
 
-const SearchBar = ({ defaultAddress, defaultRadius, onSearch, loading, dataSourceFilters, onFilterChange }) => {
+const SearchBar = ({
+  defaultAddress,
+  defaultRadius,
+  locatedAddress,
+  recentSearches = [],
+  onRemoveRecentSearch,
+  onSearch,
+  onLocate,
+  loading,
+  dataSourceFilters,
+  onFilterChange
+}) => {
   const [address, setAddress] = useState(defaultAddress);
   const [radius, setRadius] = useState(defaultRadius);
+  const [showRecent, setShowRecent] = useState(false);
+  // Show every recent search on focus; filter only once the user starts typing
+  const [filtering, setFiltering] = useState(false);
+  const [activeIndex, setActiveIndex] = useState(-1);
+
+  // Fill in the address when the app finds the user's location
+  useEffect(() => {
+    if (locatedAddress) {
+      setAddress(locatedAddress.value);
+    }
+  }, [locatedAddress]);
+
+  const suggestions = filtering ? filterRecentSearches(recentSearches, address) : recentSearches;
+  const dropdownOpen = showRecent && suggestions.length > 0;
+
+  const closeDropdown = () => {
+    setShowRecent(false);
+    setActiveIndex(-1);
+  };
 
   const handleSubmit = (e) => {
     e.preventDefault();
+    closeDropdown();
     onSearch(address, Number(radius));
+  };
+
+  const selectRecent = (item) => {
+    setAddress(item);
+    closeDropdown();
+    onSearch(item, Number(radius));
+  };
+
+  const handleAddressChange = (e) => {
+    setAddress(e.target.value);
+    setFiltering(true);
+    setShowRecent(true);
+    setActiveIndex(-1);
+  };
+
+  const handleFocus = () => {
+    setFiltering(false);
+    setShowRecent(true);
+  };
+
+  const handleKeyDown = (e) => {
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      if (!dropdownOpen) {
+        setShowRecent(true);
+        return;
+      }
+      e.preventDefault();
+      // Cycle through the suggestions and back to the typed text (index -1)
+      const next = activeIndex + (e.key === 'ArrowDown' ? 1 : -1);
+      if (next >= suggestions.length) {
+        setActiveIndex(-1);
+      } else if (next < -1) {
+        setActiveIndex(suggestions.length - 1);
+      } else {
+        setActiveIndex(next);
+      }
+    } else if (e.key === 'Enter' && dropdownOpen && activeIndex >= 0) {
+      e.preventDefault();
+      selectRecent(suggestions[activeIndex]);
+    } else if (e.key === 'Escape') {
+      closeDropdown();
+    }
+  };
+
+  const handleLocate = () => {
+    closeDropdown();
+    onLocate();
   };
 
   const handleFilterToggle = (source) => {
@@ -124,13 +305,70 @@ const SearchBar = ({ defaultAddress, defaultRadius, onSearch, loading, dataSourc
   return (
     <form onSubmit={handleSubmit}>
       <SearchContainer>
-        <Input
-          type="text"
-          placeholder="Enter address (e.g. 10601 W Van Buren St, Tolleson, AZ 85353 or City, State)"
-          value={address}
-          onChange={(e) => setAddress(e.target.value)}
-          required
-        />
+        <AddressField>
+          <Input
+            type="text"
+            placeholder="Enter address (e.g. 10601 W Van Buren St, Tolleson, AZ 85353 or City, State)"
+            value={address}
+            onChange={handleAddressChange}
+            onFocus={handleFocus}
+            onBlur={closeDropdown}
+            onKeyDown={handleKeyDown}
+            autoComplete="off"
+            role="combobox"
+            aria-label="Address"
+            aria-autocomplete="list"
+            aria-expanded={dropdownOpen}
+            aria-controls="recent-searches"
+            aria-activedescendant={activeIndex >= 0 ? `recent-search-${activeIndex}` : undefined}
+            required
+          />
+          {onLocate && (
+            <LocateButton
+              type="button"
+              onClick={handleLocate}
+              disabled={loading}
+              title="Search near my location"
+              aria-label="Search near my location"
+            >
+              <LocateIcon />
+            </LocateButton>
+          )}
+          {dropdownOpen && (
+            // preventDefault on mousedown keeps focus in the input so clicks register before blur
+            <RecentList id="recent-searches" role="listbox" onMouseDown={(e) => e.preventDefault()}>
+              <RecentHeading role="presentation">Recent searches</RecentHeading>
+              {suggestions.map((item, index) => (
+                <RecentItem
+                  key={item}
+                  id={`recent-search-${index}`}
+                  role="option"
+                  aria-selected={index === activeIndex}
+                  $active={index === activeIndex}
+                  onClick={() => selectRecent(item)}
+                  onMouseEnter={() => setActiveIndex(index)}
+                >
+                  <span>{item}</span>
+                  {onRemoveRecentSearch && (
+                    <RemoveButton
+                      type="button"
+                      tabIndex={-1}
+                      aria-label={`Remove ${item} from recent searches`}
+                      title="Remove"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onRemoveRecentSearch(item);
+                        setActiveIndex(-1);
+                      }}
+                    >
+                      ×
+                    </RemoveButton>
+                  )}
+                </RecentItem>
+              ))}
+            </RecentList>
+          )}
+        </AddressField>
         <RadiusContainer>
           <RadiusLabel>Radius (NM):</RadiusLabel>
           <RadiusInput
