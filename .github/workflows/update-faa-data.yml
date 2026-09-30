@@ -22,6 +22,8 @@ jobs:
     env:
       # Refresh the FAA CSVs on the daily schedule and manual runs, not the 3-hourly NOTAM runs
       FULL_RUN: ${{ github.event_name == 'workflow_dispatch' || github.event.schedule == '0 6 * * *' }}
+      # notam-cranes.json isn't committed; each run builds on the deployed copy
+      PREVIOUS_NOTAM_URL: https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/data/notam-cranes.json
 
     steps:
     - name: Checkout repository
@@ -63,6 +65,7 @@ jobs:
         echo "   - OEAAA: https://oeaaa.faa.gov/oeaaa/oe3a/main/#/download" >> $GITHUB_STEP_SUMMARY
         echo "3. Review and update scripts/update_faa_data.py if needed" >> $GITHUB_STEP_SUMMARY
 
+    # A bulk pull at most every 24 hours (FAA limit), otherwise only changed NOTAMs
     - name: Fetch crane NOTAMs
       id: notams
       continue-on-error: true
@@ -75,10 +78,9 @@ jobs:
     - name: Keep previous NOTAMs on failure
       if: steps.notams.outcome == 'failure'
       run: |
-        # notam-cranes.json isn't committed, so reuse the deployed copy (the frontend
-        # drops expired entries) rather than deploying without NOTAMs
-        curl -fsS -o public/data/notam-cranes.json \
-          "https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/data/notam-cranes.json" \
+        # Reuse the deployed copy (the frontend drops expired entries) rather than
+        # deploying without NOTAMs
+        curl -fsS -o public/data/notam-cranes.json "$PREVIOUS_NOTAM_URL" \
           || echo '{"generatedAt":null,"cranes":[]}' > public/data/notam-cranes.json
         echo "## :warning: NOTAM fetch failed" >> $GITHUB_STEP_SUMMARY
         echo "Deployed the previous NOTAM data instead. Check the 'Fetch crane NOTAMs' step log." >> $GITHUB_STEP_SUMMARY

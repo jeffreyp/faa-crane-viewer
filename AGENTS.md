@@ -21,7 +21,7 @@ There is no test suite (`npm test` is a stub). Verify changes by running `npm st
 - **Sources:**
   - **Part 77 (OE/AAA):** per-region downloads for the 9 FAA regions (AAL, ACE, AEA, AGL, ANE, ANM, ASO, ASW, AWP). Filtered for crane/construction keywords. Almost all records come from here.
   - **DOF (Digital Obstacle File):** filtered for crane/mobile equipment, DMS converted to decimal. Contributes only a few hundred records.
-  - **NOTAMs (NMS API):** `scripts/update_notam_data.py` downloads the bulk file of active DOMESTIC NOTAMs, keeps active crane obstructions, and writes `public/data/notam-cranes.json` in the frontend's record shape.
+  - **NOTAMs (NMS API):** `scripts/update_notam_data.py` keeps active crane obstructions and writes `public/data/notam-cranes.json` in the frontend's record shape. It downloads the bulk file of active DOMESTIC NOTAMs at most once per 24 hours, and otherwise applies NOTAMs changed since the deployed file was generated.
 - **Output:** `public/data/part77-data.csv` (Part 77 only), `public/data/datafile.csv` (Part 77 + DOF, deduped on ASN), and raw per-region files in `public/data/regions/`.
 - **Frontend:** `src/services/faaService.js` fetches both CSVs and the NOTAM JSON, parses them with PapaParse (in a Web Worker, `src/workers/csvParser.worker.js`, with a main-thread fallback), filters by Haversine distance in nautical miles, and dedupes. `src/App.js` orchestrates; `MapView`, `TableView`, and `SearchBar` are in `src/components/`. `src/utils/sanitize.js` sanitizes popup HTML with DOMPurify.
 
@@ -30,8 +30,9 @@ There is no test suite (`npm test` is a stub). Verify changes by running `npm st
 NOTAMs come from the FAA NOTAM Management Service (NMS) API, which uses OAuth2 client credentials. NMS rejects requests from Cloudflare Workers, so NOTAMs are pre-fetched in CI rather than proxied on demand.
 
 - Credentials are the `NMS_CLIENT_ID` and `NMS_CLIENT_SECRET` repo secrets (the KEY and SECRET from the FAA's NMS onboarding spreadsheet). Never commit them.
-- The `NMS_HOST` repo variable selects the environment. It defaults to staging (`https://api-staging.cgifederal-aim.com`); production (`https://api-nms.aim.faa.gov`) requires FAA sign-off and its own credentials.
-- `public/data/notam-cranes.json` is gitignored and exists only in deployments. If the fetch fails, the workflow redeploys the previous file. The frontend drops entries whose `endTime` has passed.
+- The script defaults to production (`https://api-nms.aim.faa.gov`). Set the `NMS_HOST` repo variable to `https://api-staging.cgifederal-aim.com` to use staging, which needs the staging credentials.
+- FAA production usage limits: at most one bulk pull (full classification or `/il`) per 24 hours, and at most one changed-NOTAMs pull every 3 minutes. More needs FAA approval. Don't add runs or retries that break these.
+- `public/data/notam-cranes.json` is gitignored and exists only in deployments. Each run reads the deployed copy (`bulkFetchedAt`, `generatedAt`, and `nmsId` on each record) to decide between a bulk pull and a changed-NOTAMs pull. If the fetch fails, the workflow redeploys the previous file. The frontend drops entries whose `endTime` has passed.
 - **NOTAM data is test data from NMS staging, NOT production/live data, and cannot be trusted.** The site says so in a banner, NOTAM popups, the NOTAM filter label, and NOTAM table badges; the text is `NOTAM_TEST_WARNING` in `src/config.js`. Keep these warnings until `NMS_HOST` points at production, and never describe NOTAMs as live or authoritative in docs or UI.
 - Tracked in beads epic `fcv-gyi`.
 

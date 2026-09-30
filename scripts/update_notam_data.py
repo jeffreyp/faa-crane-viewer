@@ -2,9 +2,16 @@
 """
 Fetch active crane NOTAMs from the FAA NOTAM Management Service (NMS) API.
 
-Downloads the NMS bulk file of all active DOMESTIC NOTAMs (GeoJSON), keeps
-currently active crane obstructions, and writes them in the frontend's standard
-crane record shape to public/data/notam-cranes.json.
+Keeps currently active crane obstructions and writes them in the frontend's
+standard crane record shape to public/data/notam-cranes.json.
+
+The FAA allows at most one bulk pull per 24 hours (more needs FAA approval), so:
+  - If the previous file's bulk pull is 24+ hours old (or there is no previous
+    file), download the bulk file of all active DOMESTIC NOTAMs.
+  - Otherwise, start from the previous file and apply the NOTAMs changed since
+    it was generated (lastUpdatedDate query, limited to the last 24 hours).
+The previous file is read from the deployed site (PREVIOUS_NOTAM_URL), since
+notam-cranes.json is not committed.
 
 Runs in GitHub Actions (see .github/workflows/update-faa-data.yml). NMS blocks
 requests from Cloudflare Workers, so NOTAMs can't be proxied on demand.
@@ -12,8 +19,10 @@ requests from Cloudflare Workers, so NOTAMs can't be proxied on demand.
 Environment:
   NMS_CLIENT_ID, NMS_CLIENT_SECRET  OAuth2 client credentials (the KEY and
                                     SECRET from the NMS onboarding spreadsheet)
-  NMS_HOST                          Optional. Defaults to staging (pre-prod);
-                                    production is https://api-nms.aim.faa.gov
+  NMS_HOST                          Optional. Defaults to production; staging
+                                    is https://api-staging.cgifederal-aim.com
+  PREVIOUS_NOTAM_URL                Optional. URL of the currently deployed
+                                    notam-cranes.json
 """
 
 import gzip
@@ -21,11 +30,16 @@ import json
 import os
 import re
 import sys
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import requests
 
-DEFAULT_NMS_HOST = 'https://api-staging.cgifederal-aim.com'
+DEFAULT_NMS_HOST = 'https://api-nms.aim.faa.gov'
+# FAA production limit: at most one bulk pull per 24 hours
+BULK_INTERVAL = timedelta(hours=24)
+# lastUpdatedDate may not be more than 24 hours back; overlap runs by a few minutes
+MAX_DELTA_WINDOW = timedelta(hours=23, minutes=50)
+DELTA_OVERLAP = timedelta(minutes=10)
 OUTPUT_PATH = os.path.join(os.path.dirname(__file__), '..', 'public', 'data', 'notam-cranes.json')
 USER_AGENT = 'FAA-Crane-Viewer/1.0 (+https://jeffreyp.github.io/faa-crane-viewer)'
 
@@ -81,6 +95,42 @@ def download_domestic_notams(session, host, token):
     if raw[:2] == b'\x1f\x8b':
         raw = gzip.decompress(raw)
     return extract_features(raw.decode('utf-8'))
+
+
+def download_changed_notams(session, host, token, since):
+    """NOTAMs created, updated, or canceled since the given time (active and inactive)"""
+    response = session.get(
+        f'{host}/nmsapi/v1/notams',
+        params={'lastUpdatedDate': since.strftime('%Y-%m-%dT%H:%M:%SZ')},
+        headers={'Authorization': f'Bearer {token}', 'nmsResponseFormat': 'GEOJSON'},
+        timeout=120,
+    )
+    if not response.ok:
+        raise RuntimeError(f'NMS changed-NOTAMs request returned {response.status_code}: {response.text[:300]}')
+    body = response.json()
+    if body.get('status') != 'Success':
+        raise RuntimeError(f"NMS changed-NOTAMs request failed: {body.get('errors')}")
+    items = (body.get('data') or {}).get('geojson') or []
+    return [json.loads(item) if isinstance(item, str) else item for item in items]
+
+
+def load_previous(url):
+    """Previously deployed output, or None if unavailable"""
+    if not url:
+        return None
+    try:
+        response = requests.get(url, timeout=60, headers={'Cache-Control': 'no-cache'})
+        if response.ok:
+            return response.json()
+        print(f'Previous NOTAM data returned {response.status_code}; ignoring it')
+    except (requests.RequestException, ValueError) as e:
+        print(f'Could not load previous NOTAM data: {e}')
+    return None
+
+
+def notam_id(feature):
+    notam = (((feature or {}).get('properties') or {}).get('coreNOTAMData') or {}).get('notam') or {}
+    return notam.get('id')
 
 
 def extract_features(text):
@@ -181,6 +231,7 @@ def to_crane_record(feature, now):
     notam_id = f'{location} {number}'.strip() if number else notam.get('id', '')
 
     return {
+        'nmsId': notam.get('id'),
         'id': notam_id,
         'uniqueId': f"{notam.get('id') or notam_id}-NOTAM",
         'structureType': 'Crane',
@@ -209,22 +260,61 @@ def main():
         print('NMS_CLIENT_ID and NMS_CLIENT_SECRET must be set', file=sys.stderr)
         return 1
     host = os.environ.get('NMS_HOST') or DEFAULT_NMS_HOST
+    now = datetime.now(timezone.utc)
+
+    previous = load_previous(os.environ.get('PREVIOUS_NOTAM_URL'))
+    last_bulk = parse_time((previous or {}).get('bulkFetchedAt'))
+    last_generated = parse_time((previous or {}).get('generatedAt'))
+    # Records without nmsId predate incremental updates and can't be merged
+    previous_ok = previous and all((c or {}).get('nmsId') for c in previous.get('cranes', []))
 
     session = requests.Session()
     session.headers['User-Agent'] = USER_AGENT
     session.headers['Accept'] = 'application/json'
 
-    print(f'Fetching active DOMESTIC NOTAMs from {host}')
-    token = get_access_token(session, host, client_id, client_secret)
-    features = download_domestic_notams(session, host, token)
-    print(f'Downloaded {len(features)} NOTAMs')
+    if not previous_ok or not last_bulk or now - last_bulk >= BULK_INTERVAL:
+        print(f'Fetching all active DOMESTIC NOTAMs from {host} (bulk pull)')
+        token = get_access_token(session, host, client_id, client_secret)
+        features = download_domestic_notams(session, host, token)
+        print(f'Downloaded {len(features)} NOTAMs')
+        cranes = [record for record in (to_crane_record(f, now) for f in features) if record]
+        bulk_fetched_at = now
+    elif not last_generated or now - last_generated > MAX_DELTA_WINDOW:
+        # Too old to catch up incrementally, and a bulk pull isn't allowed yet;
+        # keep the previous data (expired entries are dropped below) until the next bulk pull
+        print(f'Previous NOTAM data is too old to update incrementally; next bulk pull after {last_bulk + BULK_INTERVAL}')
+        cranes = previous['cranes']
+        bulk_fetched_at = last_bulk
+    else:
+        since = last_generated - DELTA_OVERLAP
+        print(f'Fetching NOTAMs changed since {since.isoformat()} from {host}')
+        token = get_access_token(session, host, client_id, client_secret)
+        changed = download_changed_notams(session, host, token, since)
+        print(f'Downloaded {len(changed)} changed NOTAMs')
+        by_id = {c['nmsId']: c for c in previous['cranes']}
+        for feature in changed:
+            nms_id = notam_id(feature)
+            if not nms_id:
+                continue
+            record = to_crane_record(feature, now)
+            if record:
+                by_id[nms_id] = record
+            else:
+                # Canceled, expired, or no longer a crane
+                by_id.pop(nms_id, None)
+        cranes = list(by_id.values())
+        bulk_fetched_at = last_bulk
 
-    now = datetime.now(timezone.utc)
-    cranes = [record for record in (to_crane_record(f, now) for f in features) if record]
+    # Drop anything that has expired since it was fetched
+    cranes = [c for c in cranes if not parse_time(c.get('endTime')) or parse_time(c['endTime']) >= now]
     print(f'Kept {len(cranes)} active crane NOTAMs')
 
     with open(OUTPUT_PATH, 'w') as f:
-        json.dump({'generatedAt': now.isoformat(), 'cranes': cranes}, f, separators=(',', ':'))
+        json.dump({
+            'generatedAt': now.isoformat(),
+            'bulkFetchedAt': bulk_fetched_at.isoformat(),
+            'cranes': cranes,
+        }, f, separators=(',', ':'))
     print(f'Wrote {os.path.normpath(OUTPUT_PATH)}')
     return 0
 
