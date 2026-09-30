@@ -53,7 +53,7 @@ Some FAA headers have trailing spaces (for example `"SPONSOR NAME "`); see `fcv-
 
 - Commit messages: `Add …` / `Fix …` / `Update …`, with a descriptive body. The data bot uses `Update FAA obstacle data - YYYY-MM-DD`.
 - Match the existing style: functional React components, styled-components, and plain JS (no TypeScript).
-- Don't commit or push unless asked.
+- Don't commit or push unless asked. When asked, commit directly on `main` and push to `origin main`. Don't create branches or pull requests unless the user asks for them.
 
 <!-- BEGIN BEADS INTEGRATION v:1 profile:minimal hash:1105d646 -->
 ## Beads Issue Tracker
