@@ -34,7 +34,6 @@ NOTAMs come from the FAA NOTAM Management Service (NMS) API, which uses OAuth2 c
 - FAA production usage limits: at most one bulk pull (full classification or `/il`) per 24 hours, and at most one changed-NOTAMs pull every 3 minutes. More needs FAA approval. Don't add runs or retries that break these.
 - `public/data/notam-cranes.json` is gitignored and exists only in deployments. Each run reads the deployed copy (`bulkFetchedAt`, `generatedAt`, and `nmsId` on each record) to decide between a bulk pull and a changed-NOTAMs pull. If the fetch fails, the workflow redeploys the previous file. The frontend drops entries whose `endTime` has passed.
 - NOTAMs come from NMS production (since 2026-09-30) but can be up to 3 hours old. The site shows a notice and a line in NOTAM popups saying so and that it isn't for flight planning; the text is `NOTAM_DISCLAIMER` in `src/config.js`. Don't describe NOTAMs as real-time or authoritative in docs or UI.
-- Tracked in beads epic `fcv-gyi`.
 
 ## Data contract
 
