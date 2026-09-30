@@ -10,7 +10,7 @@ Live: https://jeffreyp.github.io/faa-crane-viewer (GitHub Pages, no backend)
 npm start                             # dev server, localhost:3000
 CARTO_API_KEY=... npm run build       # production build -> public/bundle.js
 python3 scripts/update_faa_data.py    # refresh public/data/ (needs requests, pandas)
-NMS_CLIENT_ID=... NMS_CLIENT_SECRET=... python3 scripts/update_notam_data.py  # refresh public/data/notam-cranes.json
+NMS_CLIENT_ID=... NMS_CLIENT_SECRET=... python3 scripts/update_notam_data.py  # refresh public/data/notam-cranes.json (a bulk pull: counts toward the FAA's 1-per-24h limit)
 ```
 
 There is no test suite (`npm test` is a stub). Verify changes by running `npm start` and doing a search.
@@ -33,7 +33,7 @@ NOTAMs come from the FAA NOTAM Management Service (NMS) API, which uses OAuth2 c
 - The script defaults to production (`https://api-nms.aim.faa.gov`). Set the `NMS_HOST` repo variable to `https://api-staging.cgifederal-aim.com` to use staging, which needs the staging credentials.
 - FAA production usage limits: at most one bulk pull (full classification or `/il`) per 24 hours, and at most one changed-NOTAMs pull every 3 minutes. More needs FAA approval. Don't add runs or retries that break these.
 - `public/data/notam-cranes.json` is gitignored and exists only in deployments. Each run reads the deployed copy (`bulkFetchedAt`, `generatedAt`, and `nmsId` on each record) to decide between a bulk pull and a changed-NOTAMs pull. If the fetch fails, the workflow redeploys the previous file. The frontend drops entries whose `endTime` has passed.
-- **NOTAM data is test data from NMS staging, NOT production/live data, and cannot be trusted.** The site says so in a banner, NOTAM popups, the NOTAM filter label, and NOTAM table badges; the text is `NOTAM_TEST_WARNING` in `src/config.js`. Keep these warnings until `NMS_HOST` points at production, and never describe NOTAMs as live or authoritative in docs or UI.
+- NOTAMs come from NMS production (since 2026-09-30) but can be up to 3 hours old. The site shows a notice and a line in NOTAM popups saying so and that it isn't for flight planning; the text is `NOTAM_DISCLAIMER` in `src/config.js`. Don't describe NOTAMs as real-time or authoritative in docs or UI.
 - Tracked in beads epic `fcv-gyi`.
 
 ## Data contract

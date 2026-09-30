@@ -205,7 +205,7 @@ const TableView = ({ cranes, loading, selectedCraneId, onCraneSelect }) => {
                     ? `${crane[column.field]} ft`
                     : column.field === 'dataSource'
                     ? <SourceBadge source={crane.dataSource}>
-                        {crane.dataSource === 'NOTAM' ? 'NOTAM (TEST DATA)' : crane.dataSource}
+                        {crane.dataSource}
                       </SourceBadge>
                     : crane[column.field]}
                 </TableCell>

@@ -1,10 +1,11 @@
 # FAA Data Automation Scripts
 
-This directory contains the script that downloads and processes FAA obstacle data.
+This directory contains the scripts that download and process FAA crane data.
 
 ## Files
 
 - `update_faa_data.py` - Python script that downloads FAA Digital Obstacle File (DOF) and Part 77 regional data, then merges and converts to the format used by the crane viewer
+- `update_notam_data.py` - Python script that fetches active crane NOTAMs from the FAA NOTAM Management Service (NMS) API and writes `public/data/notam-cranes.json`
 
 ## Background
 
@@ -29,14 +30,19 @@ The DOF is the FAA's master database of verified obstacles. **Important Note**: 
 
 Part 77 data includes structures that have been evaluated for their aeronautical impact through the OE/AAA review process.
 
-### NOTAMs (disabled)
+### 3. NOTAMs
+- **API:** FAA NOTAM Management Service (NMS), production (`https://api-nms.aim.faa.gov`)
+- **Auth:** OAuth2 client credentials from the `NMS_CLIENT_ID` and `NMS_CLIENT_SECRET` secrets
+- **Format:** GeoJSON
+- **Records:** several hundred active crane obstructions nationwide
 
-NOTAMs were a third, on-demand source fetched in the browser through a Cloudflare Worker (`cloudflare-worker/notam-proxy.js`), never by this script. They are currently disabled because the FAA retired the legacy NOTAM Search endpoint; see `NOTAM_PROXY_URL` in `src/config.js` and beads epic `fcv-gyi`.
+The FAA allows at most one bulk download per 24 hours in production. `update_notam_data.py` reads the currently deployed `notam-cranes.json` and downloads the bulk file of active DOMESTIC NOTAMs only if the last bulk download was 24+ hours ago; otherwise it fetches just the NOTAMs changed since the previous run and merges them in. `notam-cranes.json` is not committed; it only exists in deployments.
 
 ## GitHub Actions Workflow
 
 The `.github/workflows/update-faa-data.yml` workflow automatically:
-- Runs daily at 6 AM UTC
+- Runs daily at 6 AM UTC, and every 3 hours at :30 for NOTAMs only
+- Fetches crane NOTAMs on every run (redeploying the previous NOTAM file if the fetch fails)
 - Downloads the latest FAA DOF data
 - Downloads Part 77 regional data from all 9 FAA regions
 - Processes and merges both data sources
@@ -46,7 +52,7 @@ The `.github/workflows/update-faa-data.yml` workflow automatically:
 - Commits and pushes changes if data has been updated
 - Rebuilds and redeploys to GitHub Pages
 
-**Note:** The workflow has a 10-minute timeout. DOF + Part77 processing typically completes in 2-3 minutes.
+**Note:** The workflow has a 15-minute timeout. DOF + Part77 processing typically completes in 2-3 minutes.
 
 ## Manual Testing
 
@@ -55,6 +61,12 @@ To run the full update process (requires pandas and requests):
 ```bash
 pip install requests pandas
 python3 scripts/update_faa_data.py
+```
+
+To fetch NOTAMs (requires requests). Without `PREVIOUS_NOTAM_URL` this does a bulk download, which counts toward the FAA's one-per-24-hours production limit:
+
+```bash
+NMS_CLIENT_ID=... NMS_CLIENT_SECRET=... python3 scripts/update_notam_data.py
 ```
 
 ## Data Format Conversion

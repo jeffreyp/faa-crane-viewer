@@ -171,7 +171,7 @@ const SearchBar = ({ defaultAddress, defaultRadius, onSearch, loading, dataSourc
               checked={dataSourceFilters.notam}
               onChange={() => handleFilterToggle('notam')}
             />
-            NOTAM (test data, not live)
+            NOTAM
           </FilterLabel>
         </FilterContainer>
       )}
