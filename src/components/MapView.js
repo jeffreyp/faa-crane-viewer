@@ -6,7 +6,7 @@ import 'leaflet.markercluster/dist/MarkerCluster.css';
 import 'leaflet.markercluster/dist/MarkerCluster.Default.css';
 import { cranesToGeoJson, RADIUS_NM_TO_METERS } from '../services/faaService';
 import { sanitizeText } from '../utils/sanitize';
-import { CARTO_API_KEY, NOTAM_TEST_WARNING } from '../config';
+import { CARTO_API_KEY, NOTAM_DISCLAIMER } from '../config';
 
 // Create custom crane icon (for DOF and Part77 data)
 const craneIcon = L.icon({
@@ -231,9 +231,6 @@ const MapView = ({ location, radius, cranes, selectedCraneId, onCraneSelect }) =
           if (isNOTAM) {
             // NOTAM-specific popup with emphasis on temporary nature
             popupContent += `
-              <div style="background-color: #B71C1C; color: white; padding: 8px; border-radius: 4px; margin-bottom: 8px;">
-                <strong>⚠️ TEST DATA, NOT LIVE:</strong> ${sanitizeText(NOTAM_TEST_WARNING)}
-              </div>
               <div style="background-color: #FFF3E0; padding: 8px; border-radius: 4px; margin-bottom: 8px;">
                 <strong style="color: #FF8C00;">⚠️ Temporary Obstruction</strong>
               </div>
@@ -243,6 +240,9 @@ const MapView = ({ location, radius, cranes, selectedCraneId, onCraneSelect }) =
               <div style="background-color: #E3F2FD; padding: 6px; border-radius: 4px; margin-top: 6px;">
                 <strong>Active Period:</strong><br/>
                 ${sanitized.startDate} to ${sanitized.endDate}
+              </div>
+              <div style="color: #666; font-size: 0.75rem; margin-top: 6px;">
+                ${sanitizeText(NOTAM_DISCLAIMER)}
               </div>
             `;
           } else {
