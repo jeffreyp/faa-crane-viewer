@@ -65,8 +65,13 @@ const App = () => {
   const [selectedCraneId, setSelectedCraneId] = useState(null);
   // A search in the URL (?q=&r=) takes priority over geolocation and the default location
   const [urlSearch] = useState(readSearchFromUrl);
+  // Without a URL search or the user's location, start at the most recent search
+  // (one saved with its location, so it needs no geocoding) before the default location
+  const [lastSearch] = useState(() => loadRecentSearches().find(item => item.location) ?? null);
   const [location, setLocation] = useState(DEFAULT_LOCATION);
-  const [radius, setRadius] = useState(urlSearch?.radius ?? DEFAULT_RADIUS);
+  const [radius, setRadius] = useState(
+    urlSearch ? (urlSearch.radius ?? DEFAULT_RADIUS) : (lastSearch?.radius ?? DEFAULT_RADIUS)
+  );
   const [dataSourceFilters, setDataSourceFilters] = useState({
     dof: true,
     part77: true,
@@ -85,8 +90,18 @@ const App = () => {
     return searchCranes(DEFAULT_LOCATION, radius);
   };
 
+  const searchStartLocation = (radius) => {
+    if (!lastSearch) {
+      return searchDefaultLocation(radius);
+    }
+    setLocation(lastSearch.location);
+    // Like the default location, keep it out of the URL so a reload still tries geolocation
+    writeSearchToUrl({ address: null, radius, location: lastSearch.location }, 'replace');
+    return searchCranes(lastSearch.location, radius);
+  };
+
   // Start at the search in the URL if there is one. Otherwise start at the user's
-  // location if they allow it, or at the default location.
+  // location if they allow it, or at the most recent search or the default location.
   useEffect(() => {
     const init = async () => {
       if (urlSearch) {
@@ -95,16 +110,16 @@ const App = () => {
       }
       const permission = await getGeolocationPermission();
       if (permission === 'denied') {
-        searchDefaultLocation(radius);
+        searchStartLocation(radius);
         return;
       }
-      // Show the default location while the browser asks for permission
+      // Show the start location while the browser asks for permission
       if (permission !== 'granted') {
-        searchDefaultLocation(radius);
+        searchStartLocation(radius);
       }
       const found = await locateUser(false);
       if (!found && permission === 'granted') {
-        searchDefaultLocation(radius);
+        searchStartLocation(radius);
       }
     };
     init();
@@ -198,16 +213,18 @@ const App = () => {
 
   // fromUrl: the search came from the URL (page load or a hand-edited URL), so
   // update the current history entry and leave recent searches alone.
-  const handleSearch = async (address, radius, { fromUrl = false } = {}) => {
+  // coordinates: { lat, lng } for an address that's already geocoded (a picked suggestion).
+  const handleSearch = async (address, radius, { fromUrl = false, coordinates = null } = {}) => {
     console.log('Search initiated:', { address, radius });
     userSearchedRef.current = true;
     setLoading(true);
     setError(null);
 
     try {
-      // Geocode the address
-      console.log('Geocoding address:', address);
-      const geocodeResult = await geocodeAddress(address);
+      // Geocode the address unless it came with coordinates
+      const geocodeResult = coordinates
+        ? { latitude: coordinates.lat, longitude: coordinates.lng, displayName: address.trim() }
+        : await geocodeAddress(address);
       console.log('Geocode result:', geocodeResult);
 
       // Validate the result is within the continental US
@@ -226,7 +243,7 @@ const App = () => {
       setRadius(radius);
       writeSearchToUrl({ address: address.trim(), radius, location: newLocation }, fromUrl ? 'replace' : 'push');
       if (!fromUrl) {
-        setRecentSearches(addRecentSearch(address));
+        setRecentSearches(addRecentSearch(address, radius, newLocation));
       }
 
       // Search for cranes at the new location
@@ -274,7 +291,7 @@ const App = () => {
       <Header>
         <Title>FAA Construction Crane Viewer</Title>
         <SearchBar
-          defaultAddress={urlSearch?.address ?? DEFAULT_LOCATION.address}
+          defaultAddress={urlSearch?.address ?? lastSearch?.address ?? DEFAULT_LOCATION.address}
           defaultRadius={radius}
           filledSearch={filledSearch}
           recentSearches={recentSearches}

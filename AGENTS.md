@@ -1,6 +1,6 @@
 # FAA Crane Viewer
 
-A static React + Leaflet app that shows FAA-registered cranes near an address. Users enter an address and radius; the app geocodes it (Nominatim) and plots matching records from pre-fetched FAA CSVs.
+A static React + Leaflet app that shows FAA-registered cranes near an address. Users enter an address and radius; the app geocodes it (Nominatim; address suggestions as you type come from Photon, since Nominatim's policy forbids autocomplete) and plots matching records from pre-fetched FAA CSVs.
 
 Live: https://jeffreyp.github.io/faa-crane-viewer (GitHub Pages, no backend)
 

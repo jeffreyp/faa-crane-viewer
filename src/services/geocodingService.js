@@ -266,6 +266,71 @@ export const geocodeAddress = async (address) => {
   }
 };
 
+// Photon (https://photon.komoot.io) allows search-as-you-type, which Nominatim's
+// usage policy forbids. It's free and needs no API key; keep requests debounced.
+const PHOTON_URL = 'https://photon.komoot.io/api/';
+const CONTINENTAL_US_BBOX = '-124.848974,24.396308,-66.934570,49.384472';
+const SUGGESTION_LAYERS = ['house', 'street', 'locality', 'district', 'city'];
+export const MIN_SUGGESTION_QUERY_LENGTH = 3;
+
+const formatSuggestionLabel = ({ name, housenumber, street, city, state, postcode }) => {
+  const parts = [];
+  if (housenumber && street) {
+    parts.push(`${housenumber} ${street}`);
+  } else if (street) {
+    parts.push(street);
+  }
+  // name is the place itself (a city, or a named building); skip it when it repeats the city
+  if (name && name !== city && !parts.length) {
+    parts.push(name);
+  }
+  if (city) {
+    parts.push(city);
+  }
+  if (state) {
+    parts.push(postcode ? `${state} ${postcode}` : state);
+  }
+  return parts.join(', ');
+};
+
+// Address suggestions for a partial query, as [{ label, lat, lng }]. Labels are
+// limited to characters validateAddress accepts so they can be searched again
+// (accents are dropped). Pass an AbortSignal to cancel a stale request.
+export const fetchAddressSuggestions = async (query, signal) => {
+  const trimmed = query.trim();
+  if (trimmed.length < MIN_SUGGESTION_QUERY_LENGTH) {
+    return [];
+  }
+  const params = new URLSearchParams({ q: trimmed, limit: '5', lang: 'en', bbox: CONTINENTAL_US_BBOX });
+  SUGGESTION_LAYERS.forEach(layer => params.append('layer', layer));
+  const response = await fetch(`${PHOTON_URL}?${params}`, { signal });
+  if (!response.ok) {
+    throw new Error(`Address suggestions returned ${response.status}`);
+  }
+  const result = await response.json();
+  const seen = new Set();
+  return (result.features || []).flatMap(feature => {
+    const properties = feature.properties || {};
+    const [lng, lat] = feature.geometry?.coordinates || [];
+    if (properties.countrycode !== 'US' || !isWithinContinentalUS(lat, lng)) {
+      return [];
+    }
+    const label = formatSuggestionLabel(properties)
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '');
+    try {
+      validateAddress(label);
+    } catch (error) {
+      return [];
+    }
+    if (seen.has(label.toLowerCase())) {
+      return [];
+    }
+    seen.add(label.toLowerCase());
+    return [{ label, lat, lng }];
+  });
+};
+
 // Helper function to format an address for display
 export const formatDisplayAddress = (geocodeResult) => {
   if (!geocodeResult || !geocodeResult.address) {
