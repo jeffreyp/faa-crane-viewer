@@ -61,7 +61,7 @@ const SourceBadge = styled.span`
   font-weight: bold;
 
   ${props => {
-    switch(props.source) {
+    switch(props.$source) {
       case 'NOTAM':
         return `
           background-color: #FF8C00;
@@ -204,7 +204,7 @@ const TableView = ({ cranes, loading, selectedCraneId, onCraneSelect }) => {
                   {column.field === 'height'
                     ? `${crane[column.field]} ft`
                     : column.field === 'dataSource'
-                    ? <SourceBadge source={crane.dataSource}>
+                    ? <SourceBadge $source={crane.dataSource}>
                         {crane.dataSource}
                       </SourceBadge>
                     : crane[column.field]}
