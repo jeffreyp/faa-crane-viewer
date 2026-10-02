@@ -8,12 +8,15 @@ import { NOTAM_DISCLAIMER } from './config';
 import { geocodeAddress, formatDisplayAddress, isWithinContinentalUS, reverseGeocode } from './services/geocodingService';
 import { getGeolocationPermission, getCurrentPosition } from './utils/geolocation';
 import { loadRecentSearches, addRecentSearch, removeRecentSearch } from './utils/recentSearches';
+import { readSearchFromUrl, writeSearchToUrl } from './utils/searchUrl';
 
 const DEFAULT_LOCATION = {
   lat: 33.448037, // Southeast corner of S 107th Ave and W Van Buren St
   lng: -112.285957,
   address: "10601 W Van Buren St, Tolleson, AZ 85353"
 };
+
+const DEFAULT_RADIUS = 10; // nautical miles
 
 const AppContainer = styled.div`
   display: flex;
@@ -60,8 +63,10 @@ const App = () => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [selectedCraneId, setSelectedCraneId] = useState(null);
+  // A search in the URL (?q=&r=) takes priority over geolocation and the default location
+  const [urlSearch] = useState(readSearchFromUrl);
   const [location, setLocation] = useState(DEFAULT_LOCATION);
-  const [radius, setRadius] = useState(10); // 10 nautical miles
+  const [radius, setRadius] = useState(urlSearch?.radius ?? DEFAULT_RADIUS);
   const [dataSourceFilters, setDataSourceFilters] = useState({
     dof: true,
     part77: true,
@@ -69,29 +74,68 @@ const App = () => {
   });
 
   const [recentSearches, setRecentSearches] = useState(loadRecentSearches);
-  // Set to { value } when geolocation fills in the address box
-  const [locatedAddress, setLocatedAddress] = useState(null);
+  // Set to { address, radius } to fill in the search box (after geolocation or Back/Forward)
+  const [filledSearch, setFilledSearch] = useState(null);
   // Once the user runs a search, a slow geolocation result must not replace it
   const userSearchedRef = useRef(false);
 
-  // Start at the user's location if they allow it, otherwise at the default location.
+  const searchDefaultLocation = (radius) => {
+    setLocation(DEFAULT_LOCATION);
+    writeSearchToUrl({ address: null, radius, location: DEFAULT_LOCATION }, 'replace');
+    return searchCranes(DEFAULT_LOCATION, radius);
+  };
+
+  // Start at the search in the URL if there is one. Otherwise start at the user's
+  // location if they allow it, or at the default location.
   useEffect(() => {
     const init = async () => {
+      if (urlSearch) {
+        handleSearch(urlSearch.address, radius, { fromUrl: true });
+        return;
+      }
       const permission = await getGeolocationPermission();
       if (permission === 'denied') {
-        searchCranes(DEFAULT_LOCATION, radius);
+        searchDefaultLocation(radius);
         return;
       }
       // Show the default location while the browser asks for permission
       if (permission !== 'granted') {
-        searchCranes(DEFAULT_LOCATION, radius);
+        searchDefaultLocation(radius);
       }
       const found = await locateUser(false);
       if (!found && permission === 'granted') {
-        searchCranes(DEFAULT_LOCATION, radius);
+        searchDefaultLocation(radius);
       }
     };
     init();
+  }, []);
+
+  // Back/Forward: rerun the search for that history entry
+  useEffect(() => {
+    const handlePopState = (event) => {
+      userSearchedRef.current = true;
+      const state = event.state;
+      if (state && state.location) {
+        setLocation(state.location);
+        setRadius(state.radius);
+        setFilledSearch({ address: state.address || state.location.address, radius: state.radius });
+        searchCranes(state.location, state.radius);
+        return;
+      }
+      // An entry we didn't create (for example, a hand-edited URL)
+      const fromUrl = readSearchFromUrl();
+      if (fromUrl) {
+        const newRadius = fromUrl.radius ?? DEFAULT_RADIUS;
+        setFilledSearch({ address: fromUrl.address, radius: newRadius });
+        handleSearch(fromUrl.address, newRadius, { fromUrl: true });
+      } else {
+        setRadius(DEFAULT_RADIUS);
+        setFilledSearch({ address: DEFAULT_LOCATION.address, radius: DEFAULT_RADIUS });
+        searchDefaultLocation(DEFAULT_RADIUS);
+      }
+    };
+    window.addEventListener('popstate', handlePopState);
+    return () => window.removeEventListener('popstate', handlePopState);
   }, []);
 
   // Search around the user's position. Returns true if a search ran. Errors are
@@ -113,7 +157,9 @@ const App = () => {
       }
       const newLocation = { ...position, address };
       setLocation(newLocation);
-      setLocatedAddress({ value: address });
+      setFilledSearch({ address });
+      // Keep the user's position out of the URL; the history entry still remembers it
+      writeSearchToUrl({ address: null, radius, location: newLocation }, userInitiated ? 'push' : 'replace');
       await searchCranes(newLocation, radius);
       return true;
     } catch (err) {
@@ -150,7 +196,9 @@ const App = () => {
     }
   };
 
-  const handleSearch = async (address, radius) => {
+  // fromUrl: the search came from the URL (page load or a hand-edited URL), so
+  // update the current history entry and leave recent searches alone.
+  const handleSearch = async (address, radius, { fromUrl = false } = {}) => {
     console.log('Search initiated:', { address, radius });
     userSearchedRef.current = true;
     setLoading(true);
@@ -176,7 +224,10 @@ const App = () => {
 
       setLocation(newLocation);
       setRadius(radius);
-      setRecentSearches(addRecentSearch(address));
+      writeSearchToUrl({ address: address.trim(), radius, location: newLocation }, fromUrl ? 'replace' : 'push');
+      if (!fromUrl) {
+        setRecentSearches(addRecentSearch(address));
+      }
 
       // Search for cranes at the new location
       await searchCranes(newLocation, radius);
@@ -223,9 +274,9 @@ const App = () => {
       <Header>
         <Title>FAA Construction Crane Viewer</Title>
         <SearchBar
-          defaultAddress={DEFAULT_LOCATION.address}
+          defaultAddress={urlSearch?.address ?? DEFAULT_LOCATION.address}
           defaultRadius={radius}
-          locatedAddress={locatedAddress}
+          filledSearch={filledSearch}
           recentSearches={recentSearches}
           onRemoveRecentSearch={(address) => setRecentSearches(removeRecentSearch(address))}
           onSearch={handleSearch}

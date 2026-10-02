@@ -212,7 +212,7 @@ const FilterTitle = styled.span`
 const SearchBar = ({
   defaultAddress,
   defaultRadius,
-  locatedAddress,
+  filledSearch,
   recentSearches = [],
   onRemoveRecentSearch,
   onSearch,
@@ -228,12 +228,15 @@ const SearchBar = ({
   const [filtering, setFiltering] = useState(false);
   const [activeIndex, setActiveIndex] = useState(-1);
 
-  // Fill in the address when the app finds the user's location
+  // Fill in the search when the app finds the user's location or goes Back/Forward
   useEffect(() => {
-    if (locatedAddress) {
-      setAddress(locatedAddress.value);
+    if (filledSearch) {
+      setAddress(filledSearch.address);
+      if (filledSearch.radius != null) {
+        setRadius(filledSearch.radius);
+      }
     }
-  }, [locatedAddress]);
+  }, [filledSearch]);
 
   const suggestions = filtering ? filterRecentSearches(recentSearches, address) : recentSearches;
   const dropdownOpen = showRecent && suggestions.length > 0;
